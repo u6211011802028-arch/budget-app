@@ -3,40 +3,80 @@ import {
   BudgetState,
   DebtPriorityItem,
   MonthExpenseView,
+  TargetPercentages,
 } from '../types/budget';
 
 export const STORAGE_KEY = 'thai_budget_40_30_20_10_v3';
 
+export const DEFAULT_TARGET_PERCENTAGES: TargetPercentages = {
+  essential: 40,
+  debt: 30,
+  savings: 20,
+  personal: 10,
+};
+
+export function resolveTargetPercentages(
+  tp?: Partial<TargetPercentages> | null
+): TargetPercentages {
+  const pick = (val: unknown, fallback: number) => {
+    const n = Number(val);
+    return typeof val === 'number' && Number.isFinite(n) && n >= 0 && n <= 100
+      ? Math.round(n * 10) / 10
+      : fallback;
+  };
+  return {
+    essential: pick(tp?.essential, DEFAULT_TARGET_PERCENTAGES.essential),
+    debt: pick(tp?.debt, DEFAULT_TARGET_PERCENTAGES.debt),
+    savings: pick(tp?.savings, DEFAULT_TARGET_PERCENTAGES.savings),
+    personal: pick(tp?.personal, DEFAULT_TARGET_PERCENTAGES.personal),
+  };
+}
+
 export const BUDGET_CATEGORIES: {
+  key: keyof TargetPercentages;
   name: BudgetCategory;
+  displayLabel: string;
+  shortPrefix: string;
   shortName: string;
   targetPct: number;
   isSavings: boolean;
   color: string;
 }[] = [
   {
+    key: 'essential',
     name: 'ค่าใช้จ่ายจำเป็น (40%)',
+    displayLabel: 'ค่าใช้จ่ายจำเป็น',
+    shortPrefix: 'จำเป็น',
     shortName: 'จำเป็น (40%)',
     targetPct: 0.4,
     isSavings: false,
     color: '#006A63',
   },
   {
+    key: 'debt',
     name: 'ภาระผ่อนหนี้ (30%)',
+    displayLabel: 'ภาระผ่อนหนี้',
+    shortPrefix: 'ผ่อนหนี้',
     shortName: 'ผ่อนหนี้ (30%)',
     targetPct: 0.3,
     isSavings: false,
     color: '#EA580C',
   },
   {
+    key: 'savings',
     name: 'เงินออม + ลงทุน (20%)',
+    displayLabel: 'เงินออม + ลงทุน',
+    shortPrefix: 'ออม+ลงทุน',
     shortName: 'ออม+ลงทุน (20%)',
     targetPct: 0.2,
     isSavings: true,
     color: '#0284C7',
   },
   {
+    key: 'personal',
     name: 'เงินใช้ส่วนตัว (10%)',
+    displayLabel: 'เงินใช้ส่วนตัว',
+    shortPrefix: 'ส่วนตัว',
     shortName: 'ส่วนตัว (10%)',
     targetPct: 0.1,
     isSavings: false,
@@ -49,18 +89,16 @@ export const EXPENSE_CATEGORY_OPTIONS: {
   label: string;
 }[] = [
   { name: 'ค่าใช้จ่ายจำเป็น (40%)', label: 'ค่าใช้จ่ายจำเป็น (40%)' },
-  { name: 'สร้างความมั่งคั่ง (30%)', label: 'สร้างความมั่งคั่ง / ออมลงทุน (30%)' },
-  { name: 'ความต้องการส่วนตัว (20%)', label: 'ความต้องการส่วนตัว (20%)' },
-  { name: 'บริจาค / การกุศล (10%)', label: 'บริจาค / การกุศล (10%)' },
-  { name: 'ภาระผ่อนหนี้ (30%)', label: 'ภาระผ่อนหนี้ (เดิม)' },
-  { name: 'เงินออม + ลงทุน (20%)', label: 'เงินออม + ลงทุน (เดิม)' },
-  { name: 'เงินใช้ส่วนตัว (10%)', label: 'เงินใช้ส่วนตัว (เดิม)' },
+  { name: 'ภาระผ่อนหนี้ (30%)', label: 'ภาระผ่อนหนี้ (30%)' },
+  { name: 'เงินออม + ลงทุน (20%)', label: 'เงินออม + ลงทุน (20%)' },
+  { name: 'เงินใช้ส่วนตัว (10%)', label: 'เงินใช้ส่วนตัว (10%)' },
 ];
 
 export const DEFAULT_BUDGET_STATE: BudgetState = {
   months: ['พ.ย. 69', 'ธ.ค. 69', 'ม.ค. 70', 'ก.พ. 70', 'มี.ค. 70', 'เม.ย. 70'],
   activeMonth: 'พ.ย. 69',
   activeTab: 'dashboard',
+  targetPercentages: { ...DEFAULT_TARGET_PERCENTAGES },
   incomes: {
     'พ.ย. 69': { salary: 21000, side: 0, extras: [] },
     'ธ.ค. 69': { salary: 21000, side: 0, extras: [] },

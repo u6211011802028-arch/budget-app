@@ -15,6 +15,7 @@ import {
   BudgetState,
   MonthExpenseView,
   SheetConnection,
+  TargetPercentages,
 } from './types/budget';
 import {
   DEFAULT_BUDGET_STATE,
@@ -374,6 +375,10 @@ export default function App() {
 
   const handleTabChange = (tab: ActiveTab) => {
     setState((prev) => ({ ...prev, activeTab: tab }));
+  };
+
+  const handleUpdateTargetPercentages = (targetPercentages: TargetPercentages) => {
+    setState((prev) => ({ ...prev, targetPercentages }));
   };
 
   const handleTogglePaid = (expenseId: number) => {
@@ -1017,6 +1022,7 @@ export default function App() {
             onTogglePaid={handleTogglePaid}
             onOpenIncomeModal={() => setIsIncomeModalOpen(true)}
             onSwitchToTransactions={() => handleTabChange('transactions')}
+            onUpdateTargetPercentages={handleUpdateTargetPercentages}
           />
         )}
 

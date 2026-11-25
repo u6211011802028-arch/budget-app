@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -21,17 +21,21 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  RotateCcw,
+  SlidersHorizontal,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
-import { BudgetState } from '../types/budget';
+import { BudgetState, TargetPercentages } from '../types/budget';
 import {
   BUDGET_CATEGORIES,
+  DEFAULT_TARGET_PERCENTAGES,
   RECOVERY_ROADMAP,
   fmt,
   fmtCompact,
   getMonthExpenses,
   getMonthIncome,
+  resolveTargetPercentages,
 } from '../data/defaultBudget';
 
 interface DashboardViewProps {
@@ -39,6 +43,7 @@ interface DashboardViewProps {
   onTogglePaid: (expenseId: number) => void;
   onOpenIncomeModal: () => void;
   onSwitchToTransactions: () => void;
+  onUpdateTargetPercentages: (next: TargetPercentages) => void;
 }
 
 type ProportionStatusLevel = 'on-target' | 'warning' | 'off-target';
@@ -48,8 +53,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onTogglePaid,
   onOpenIncomeModal,
   onSwitchToTransactions,
+  onUpdateTargetPercentages,
 }) => {
   const [proportionBasis, setProportionBasis] = useState<'income' | 'expense'>('income');
+  const [isEditingPct, setIsEditingPct] = useState(false);
+
+  const targets = useMemo(
+    () => resolveTargetPercentages(state.targetPercentages),
+    [state.targetPercentages]
+  );
+
+  const [draftPct, setDraftPct] = useState<Record<keyof TargetPercentages, string>>({
+    essential: String(targets.essential),
+    debt: String(targets.debt),
+    savings: String(targets.savings),
+    personal: String(targets.personal),
+  });
+
+  useEffect(() => {
+    setDraftPct({
+      essential: String(targets.essential),
+      debt: String(targets.debt),
+      savings: String(targets.savings),
+      personal: String(targets.personal),
+    });
+  }, [targets]);
+
+  const targetSum =
+    Math.round(
+      (targets.essential + targets.debt + targets.savings + targets.personal) * 10
+    ) / 10;
+  const formulaLabel = `${targets.essential}-${targets.debt}-${targets.savings}-${targets.personal}`;
+  const isDefaultFormula =
+    targets.essential === DEFAULT_TARGET_PERCENTAGES.essential &&
+    targets.debt === DEFAULT_TARGET_PERCENTAGES.debt &&
+    targets.savings === DEFAULT_TARGET_PERCENTAGES.savings &&
+    targets.personal === DEFAULT_TARGET_PERCENTAGES.personal;
+
+  const handleDraftPctChange = (key: keyof TargetPercentages, raw: string) => {
+    setDraftPct((prev) => ({ ...prev, [key]: raw }));
+    if (raw.trim() === '') return;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) {
+      onUpdateTargetPercentages({
+        ...targets,
+        [key]: Math.round(parsed * 10) / 10,
+      });
+    }
+  };
+
+  const handleDraftPctBlur = (key: keyof TargetPercentages) => {
+    const raw = draftPct[key].trim();
+    const parsed = Number(raw);
+    if (raw === '' || !Number.isFinite(parsed)) {
+      setDraftPct((prev) => ({ ...prev, [key]: String(targets[key]) }));
+      return;
+    }
+    const clamped = Math.min(100, Math.max(0, Math.round(parsed * 10) / 10));
+    onUpdateTargetPercentages({ ...targets, [key]: clamped });
+    setDraftPct((prev) => ({ ...prev, [key]: String(clamped) }));
+  };
+
+  const handleResetPercentages = () => {
+    onUpdateTargetPercentages({ ...DEFAULT_TARGET_PERCENTAGES });
+  };
 
   const m = state.activeMonth;
   const incData = useMemo(() => getMonthIncome(state, m), [state, m]);
@@ -69,7 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const net = incData.total - totalExpense;
   const expPct = incData.total > 0 ? (totalExpense / incData.total) * 100 : 0;
 
-  // 40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล
+  // ค่าใช้จ่ายจำเป็น (40%) · ภาระผ่อนหนี้ (30%) · เงินออม + ลงทุน (20%) · เงินใช้ส่วนตัว (10%)
   const proportionAudit = useMemo(() => {
     const baseAmount =
       proportionBasis === 'income'
@@ -84,40 +151,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         .reduce((s, e) => s + e.amount, 0);
 
     const essentialAmt = sumCats(['ค่าใช้จ่ายจำเป็น (40%)']);
-    const wealthAmt = sumCats(['สร้างความมั่งคั่ง (30%)', 'เงินออม + ลงทุน (20%)']);
     const debtAmt = sumCats(['ภาระผ่อนหนี้ (30%)']);
-    const personalAmt = sumCats(['ความต้องการส่วนตัว (20%)', 'เงินใช้ส่วนตัว (10%)']);
-    const charityAmt = sumCats(['บริจาค / การกุศล (10%)']);
+    const savingsAmt = sumCats(['เงินออม + ลงทุน (20%)', 'สร้างความมั่งคั่ง (30%)']);
+    const personalAmt = sumCats([
+      'เงินใช้ส่วนตัว (10%)',
+      'ความต้องการส่วนตัว (20%)',
+      'บริจาค / การกุศล (10%)',
+    ]);
 
     const makeItem = (
-      key: string,
-      title: string,
+      key: keyof TargetPercentages,
+      name: string,
       subtitle: string,
-      targetRatio: number,
+      targetPct: number,
       actualAmt: number,
-      mode: 'max-cap' | 'min-goal',
-      extraNote?: string
+      mode: 'max-cap' | 'min-goal'
     ) => {
+      const targetRatio = targetPct / 100;
       const targetAmt = baseAmount * targetRatio;
-      const targetPct = targetRatio * 100;
       const actualPct = baseAmount > 0 ? (actualAmt / baseAmount) * 100 : 0;
 
       let status: ProportionStatusLevel;
       let statusLabel: string;
 
       if (mode === 'max-cap') {
-        if (actualPct <= targetPct) {
+        if (targetPct === 0) {
+          if (actualAmt === 0) {
+            status = 'on-target';
+            statusLabel = 'ตรงตามสัดส่วน (0%)';
+          } else {
+            status = 'off-target';
+            statusLabel = 'เกินเพดาน 0%';
+          }
+        } else if (actualPct <= targetPct) {
           status = 'on-target';
           statusLabel = `ตรงตามสัดส่วน (≤ ${targetPct}%)`;
         } else if (actualPct <= targetPct + 6) {
           status = 'warning';
-          statusLabel = `เกินสัดส่วนเล็กน้อย`;
+          statusLabel = 'เกินสัดส่วนเล็กน้อย';
         } else {
           status = 'off-target';
           statusLabel = `เกินสัดส่วน ${targetPct}%`;
         }
       } else {
-        if (actualPct >= targetPct) {
+        if (targetPct === 0) {
+          status = 'on-target';
+          statusLabel = 'ตามเป้าหมาย (0%)';
+        } else if (actualPct >= targetPct) {
           status = 'on-target';
           statusLabel = `ถึงเป้าหมาย (≥ ${targetPct}%)`;
         } else if (actualPct >= targetPct * 0.5) {
@@ -125,7 +205,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           statusLabel = `ใกล้เป้าหมาย ${targetPct}%`;
         } else {
           status = 'off-target';
-          statusLabel = actualAmt === 0 ? `ยังไม่มีรายการ (เป้า ${targetPct}%)` : `ต่ำกว่าเกณฑ์ ${targetPct}%`;
+          statusLabel =
+            actualAmt === 0
+              ? `ยังไม่มีรายการ (เป้า ${targetPct}%)`
+              : `ต่ำกว่าเกณฑ์ ${targetPct}%`;
         }
       }
 
@@ -133,7 +216,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       return {
         key,
-        title,
+        name,
+        title: `${name} (${targetPct}%)`,
         subtitle,
         targetPct,
         targetAmt,
@@ -143,43 +227,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         status,
         statusLabel,
         diff,
-        extraNote,
       };
     };
 
     const items = [
       makeItem(
         'essential',
-        '40% · จำเป็น',
+        'ค่าใช้จ่ายจำเป็น',
         'ค่าใช้จ่ายจำเป็นในชีวิตประจำวัน',
-        0.4,
+        targets.essential,
         essentialAmt,
         'max-cap'
       ),
       makeItem(
-        'wealth',
-        '30% · สร้างความมั่งคั่ง',
-        'เงินออม การลงทุน และสร้างทรัพย์สิน',
-        0.3,
-        wealthAmt,
-        'min-goal',
-        debtAmt > 0 ? `มีภาระผ่อนหนี้แยกอีก ฿${fmtCompact(debtAmt)}` : undefined
-      ),
-      makeItem(
-        'personal',
-        '20% · ความต้องการส่วนตัว',
-        'ไลฟ์สไตล์ ท่องเที่ยว และของขวัญ',
-        0.2,
-        personalAmt,
+        'debt',
+        'ภาระผ่อนหนี้',
+        'ผ่อนชำระหนี้สินและบัตรเครดิต',
+        targets.debt,
+        debtAmt,
         'max-cap'
       ),
       makeItem(
-        'charity',
-        '10% · บริจาค/การกุศล',
-        'การให้ ทำบุญ และช่วยเหลือสังคม',
-        0.1,
-        charityAmt,
+        'savings',
+        'เงินออม + ลงทุน',
+        'เงินออม กองทุน และสร้างความมั่งคั่ง',
+        targets.savings,
+        savingsAmt,
         'min-goal'
+      ),
+      makeItem(
+        'personal',
+        'เงินใช้ส่วนตัว',
+        'ไลฟ์สไตล์ ของใช้ และความสุขส่วนตัว',
+        targets.personal,
+        personalAmt,
+        'max-cap'
       ),
     ];
 
@@ -190,7 +272,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       items,
       matchedCount,
     };
-  }, [exps, incData.total, totalExpense, proportionBasis]);
+  }, [exps, incData.total, totalExpense, proportionBasis, targets]);
 
   // Monthly Trend Data for Real-time ComposedChart
   const monthlyTrendData = useMemo(() => {
@@ -206,9 +288,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [state]);
 
-  // 40-30-20-10 Breakdown Data (supports both legacy & new category tags)
+  // Dynamic Breakdown Data (synced with custom target percentages)
   const categoryBreakdown = useMemo(() => {
     return BUDGET_CATEGORIES.map((cat) => {
+      const customPctNum = targets[cat.key];
+      const customTargetRatio = customPctNum / 100;
       const actual = exps
         .filter((e) => {
           if (e.category === cat.name) return true;
@@ -228,12 +312,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           return false;
         })
         .reduce((s, e) => s + e.amount, 0);
-      const targetAmt = incData.total * cat.targetPct;
+      const targetAmt = incData.total * customTargetRatio;
       const actualPct = incData.total > 0 ? (actual / incData.total) * 100 : 0;
       const diff = cat.isSavings ? actual - targetAmt : targetAmt - actual;
       const isGood = cat.isSavings ? actual >= targetAmt : actual <= targetAmt;
       return {
         ...cat,
+        name: `${cat.displayLabel} (${customPctNum}%)`,
+        shortName: `${cat.shortPrefix} (${customPctNum}%)`,
+        targetPct: customTargetRatio,
         actual: Number(actual.toFixed(2)),
         targetAmt: Number(targetAmt.toFixed(2)),
         actualPct,
@@ -241,7 +328,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         isGood,
       };
     });
-  }, [exps, incData.total]);
+  }, [exps, incData.total, targets]);
 
   const pieData = useMemo(() => {
     return categoryBreakdown
@@ -402,13 +489,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* NEW: 40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล Status Strip */}
+      {/* Proportion Audit Strip: ค่าใช้จ่ายจำเป็น · ภาระผ่อนหนี้ · เงินออม + ลงทุน · เงินใช้ส่วนตัว */}
       <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
-                แถบตรวจสอบสัดส่วนรายจ่าย 40-30-20-10 · {m}
+                แถบตรวจสอบสัดส่วนรายจ่าย {formulaLabel} · {m}
               </h2>
               <span className="text-xs font-heading font-medium text-slate-500">
                 ตรงตามสัดส่วน {proportionAudit.matchedCount} / 4 หมวด
@@ -417,35 +504,116 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <p className="text-xs text-slate-500 mt-0.5">
               คำนวณเทียบจาก
               {proportionBasis === 'income' ? 'รายรับรวม' : 'รายจ่ายรวม'} ฿
-              {fmt(proportionAudit.baseAmount)} (40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล)
+              {fmt(proportionAudit.baseAmount)} (ค่าใช้จ่ายจำเป็น {targets.essential}% · ภาระผ่อนหนี้ {targets.debt}% · เงินออม + ลงทุน {targets.savings}% · เงินใช้ส่วนตัว {targets.personal}%)
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+            <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setProportionBasis('income')}
+                className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
+                  proportionBasis === 'income'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                เทียบรายรับรวม
+              </button>
+              <button
+                type="button"
+                onClick={() => setProportionBasis('expense')}
+                className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
+                  proportionBasis === 'expense'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                เทียบรายจ่ายจริง
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => setProportionBasis('income')}
-              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
-                proportionBasis === 'income'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+              onClick={() => setIsEditingPct((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold rounded-lg border whitespace-nowrap transition ${
+                isEditingPct
+                  ? 'bg-[#006A63] text-white border-[#006A63]'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
               }`}
             >
-              เทียบรายรับรวม
-            </button>
-            <button
-              type="button"
-              onClick={() => setProportionBasis('expense')}
-              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
-                proportionBasis === 'expense'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              เทียบรายจ่ายจริง
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>{isEditingPct ? 'ซ่อนตัวปรับ %' : 'ปรับ % เป้าหมาย'}</span>
             </button>
           </div>
         </div>
+
+        {/* Inline Target Percentage Customizer */}
+        {isEditingPct && (
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-heading text-slate-600">
+                กำหนดสัดส่วนเป้าหมายของแต่ละหมวดหมู่ (ปรับแก้ได้ทันทีและบันทึกลงเครื่องอัตโนมัติ)
+              </div>
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-num font-semibold ${
+                    targetSum === 100 ? 'text-[#0F766E]' : 'text-amber-700'
+                  }`}
+                >
+                  {targetSum === 100 ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    รวม {targetSum}%{targetSum !== 100 ? ' (ควรรวมให้ได้ 100%)' : ''}
+                  </span>
+                </span>
+
+                {!isDefaultFormula && (
+                  <button
+                    type="button"
+                    onClick={handleResetPercentages}
+                    className="inline-flex items-center gap-1 text-xs font-heading font-medium text-[#006A63] hover:underline whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>รีเซ็ต 40-30-20-10</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {proportionAudit.items.map((item) => (
+                <label
+                  key={item.key}
+                  className="block bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus-within:border-[#006A63] transition"
+                >
+                  <span className="block text-xs font-heading font-semibold text-slate-700 mb-1">
+                    {item.name}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={draftPct[item.key]}
+                      onChange={(e) => handleDraftPctChange(item.key, e.target.value)}
+                      onBlur={() => handleDraftPctBlur(item.key)}
+                      className="w-full bg-white border border-slate-300 rounded-md px-2.5 py-1 text-sm font-num font-bold text-slate-900 focus:outline-none focus:border-[#006A63]"
+                    />
+                    <span className="text-xs font-num font-semibold text-slate-500 shrink-0">
+                      %
+                    </span>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 4-Category Color-Coded Status Strip */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -454,7 +622,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             const StatusIcon = st.Icon;
             const fillWidth = Math.min(
               100,
-              item.targetPct > 0 ? (item.actualPct / item.targetPct) * 100 : 0
+              item.targetPct > 0
+                ? (item.actualPct / item.targetPct) * 100
+                : item.actualAmt > 0
+                ? 100
+                : 0
             );
 
             return (
@@ -523,12 +695,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       : `ขาดอีก ฿${fmtCompact(Math.abs(item.diff))}`}
                   </span>
                 </div>
-
-                {item.extraNote && (
-                  <div className="mt-1.5 text-[11px] text-slate-500">
-                    {item.extraNote}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -619,7 +785,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               สัดส่วนค่าใช้จ่ายรายหมวดหมู่ · {m}
             </h2>
             <p className="text-xs text-slate-500">
-              แสดงสัดส่วนการใช้จ่ายจริงแยกตามกลุ่ม 40-30-20-10
+              แสดงสัดส่วนการใช้จ่ายจริงแยกตามกลุ่ม {formulaLabel}
             </p>
           </div>
 
@@ -696,10 +862,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="lg:col-span-7 bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-5">
           <div>
             <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
-              สัดส่วนงบประมาณจริง vs สูตร 40-30-20-10
+              สัดส่วนงบประมาณจริง vs สูตร {formulaLabel}
             </h2>
             <p className="text-xs text-slate-500">
-              เปรียบเทียบยอดใช้จ่ายจริงกับเพดานงบประมาณที่แนะนำจากรายได้เดือน {m}
+              เปรียบเทียบยอดใช้จ่ายจริงกับเพดานงบประมาณที่กำหนดจากรายได้เดือน {m}
             </p>
           </div>
 

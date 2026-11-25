@@ -215,43 +215,6 @@ function parseNumericCell(raw: string | number | undefined): number {
 function mapCategory(rawCategory: string, itemName = ''): BudgetCategory {
   const combined = `${rawCategory} ${itemName}`.toLowerCase();
   if (
-    combined.includes('บริจาค') ||
-    combined.includes('การกุศล') ||
-    combined.includes('ทำบุญ') ||
-    combined.includes('มูลนิธิ') ||
-    combined.includes('charity') ||
-    combined.includes('donat') ||
-    combined.includes('giving')
-  ) {
-    return 'บริจาค / การกุศล (10%)';
-  }
-  if (
-    combined.includes('สร้างความมั่งคั่ง') ||
-    combined.includes('มั่งคั่ง') ||
-    combined.includes('wealth') ||
-    combined.includes('ออม') ||
-    combined.includes('ลงทุน') ||
-    combined.includes('กองทุน') ||
-    combined.includes('หุ้น') ||
-    combined.includes('saving') ||
-    combined.includes('invest')
-  ) {
-    return combined.includes('20%') ? 'เงินออม + ลงทุน (20%)' : 'สร้างความมั่งคั่ง (30%)';
-  }
-  if (
-    combined.includes('ความต้องการส่วนตัว') ||
-    combined.includes('ไลฟ์สไตล์') ||
-    combined.includes('want') ||
-    combined.includes('ส่วนตัว') ||
-    combined.includes('บันเทิง') ||
-    combined.includes('ของขวัญ') ||
-    combined.includes('ท่องเที่ยว') ||
-    combined.includes('เน็ตฟิต') ||
-    combined.includes('personal')
-  ) {
-    return combined.includes('10%') ? 'เงินใช้ส่วนตัว (10%)' : 'ความต้องการส่วนตัว (20%)';
-  }
-  if (
     combined.includes('หนี้') ||
     combined.includes('ผ่อน') ||
     combined.includes('บัตร') ||
@@ -261,6 +224,35 @@ function mapCategory(rawCategory: string, itemName = ''): BudgetCategory {
     combined.includes('ชอปปี้')
   ) {
     return 'ภาระผ่อนหนี้ (30%)';
+  }
+  if (
+    combined.includes('ออม') ||
+    combined.includes('ลงทุน') ||
+    combined.includes('สร้างความมั่งคั่ง') ||
+    combined.includes('มั่งคั่ง') ||
+    combined.includes('กองทุน') ||
+    combined.includes('หุ้น') ||
+    combined.includes('saving') ||
+    combined.includes('invest') ||
+    combined.includes('wealth')
+  ) {
+    return 'เงินออม + ลงทุน (20%)';
+  }
+  if (
+    combined.includes('ส่วนตัว') ||
+    combined.includes('ความต้องการส่วนตัว') ||
+    combined.includes('บริจาค') ||
+    combined.includes('การกุศล') ||
+    combined.includes('ทำบุญ') ||
+    combined.includes('ไลฟ์สไตล์') ||
+    combined.includes('want') ||
+    combined.includes('บันเทิง') ||
+    combined.includes('ของขวัญ') ||
+    combined.includes('ท่องเที่ยว') ||
+    combined.includes('เน็ตฟิต') ||
+    combined.includes('personal')
+  ) {
+    return 'เงินใช้ส่วนตัว (10%)';
   }
   if (
     combined.includes('40%') ||
@@ -508,6 +500,7 @@ function parseMatrixFormat(
       activeTab: previousState.activeTab,
       incomes,
       expenses,
+      targetPercentages: previousState.targetPercentages,
     },
     detectedFormat: 'matrix',
     rowCount: dataRows.length,
@@ -650,6 +643,7 @@ function parseTransactionLogFormat(
       activeTab: previousState.activeTab,
       incomes,
       expenses,
+      targetPercentages: previousState.targetPercentages,
     },
     detectedFormat: 'transactions',
     rowCount: dataRows.length,

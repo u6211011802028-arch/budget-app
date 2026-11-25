@@ -29,12 +29,20 @@ export interface ExpenseItem {
 
 export type ActiveTab = 'dashboard' | 'transactions' | 'projection';
 
+export interface TargetPercentages {
+  essential: number;
+  debt: number;
+  savings: number;
+  personal: number;
+}
+
 export interface BudgetState {
   months: string[];
   activeMonth: string;
   activeTab: ActiveTab;
   incomes: Record<string, MonthIncome>;
   expenses: ExpenseItem[];
+  targetPercentages?: TargetPercentages;
 }
 
 export interface MonthExpenseView extends ExpenseItem {

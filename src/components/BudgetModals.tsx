@@ -472,7 +472,14 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       setName(expense.name);
       setAmount(String(expense.amount));
       setNote(expense.note === '-' ? '' : expense.note);
-      setCategory(expense.category);
+      const normalizedCat: BudgetCategory =
+        expense.category === 'สร้างความมั่งคั่ง (30%)'
+          ? 'เงินออม + ลงทุน (20%)'
+          : expense.category === 'ความต้องการส่วนตัว (20%)' ||
+            expense.category === 'บริจาค / การกุศล (10%)'
+          ? 'เงินใช้ส่วนตัว (10%)'
+          : expense.category;
+      setCategory(normalizedCat);
       setPaid(expense.isPaid);
       setApplyFutureMonths(false);
     }
