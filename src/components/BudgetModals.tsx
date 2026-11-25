@@ -1,10 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { BudgetCategory } from '../types/budget';
-import { EXPENSE_CATEGORY_OPTIONS } from '../data/defaultBudget';
+import {
+  EXPENSE_CATEGORY_OPTIONS,
+  buildFutureMonthSequence,
+} from '../data/defaultBudget';
 
 interface AddExpenseModalProps {
   isOpen: boolean;
+  months: string[];
+  activeMonth: string;
   onClose: () => void;
   onSubmit: (data: {
     name: string;
@@ -12,12 +17,15 @@ interface AddExpenseModalProps {
     note: string;
     category: BudgetCategory;
     recurring: boolean;
+    recurringEndMonth: string;
     paid: boolean;
   }) => void;
 }
 
 export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   isOpen,
+  months,
+  activeMonth,
   onClose,
   onSubmit,
 }) => {
@@ -26,7 +34,13 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<BudgetCategory>('ค่าใช้จ่ายจำเป็น (40%)');
   const [recurring, setRecurring] = useState(false);
+  const [recurringEndMonth, setRecurringEndMonth] = useState('');
   const [paid, setPaid] = useState(false);
+
+  const futureOptions = useMemo(
+    () => buildFutureMonthSequence(months, activeMonth, 12),
+    [months, activeMonth]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -35,6 +49,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setNote('');
       setCategory('ค่าใช้จ่ายจำเป็น (40%)');
       setRecurring(false);
+      setRecurringEndMonth('');
       setPaid(false);
     }
   }, [isOpen]);
@@ -51,6 +66,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       note: note.trim() || '-',
       category,
       recurring,
+      recurringEndMonth: recurring ? recurringEndMonth : '',
       paid,
     });
     onClose();
@@ -143,11 +159,44 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             <input
               type="checkbox"
               checked={recurring}
-              onChange={(e) => setRecurring(e.target.checked)}
+              onChange={(e) => {
+                setRecurring(e.target.checked);
+                if (!e.target.checked) setRecurringEndMonth('');
+              }}
               className="w-4 h-4 accent-[#006A63] rounded"
             />
             <span>ทำซ้ำทุกเดือน (ตั้งแต่เดือนนี้เป็นต้นไป)</span>
           </label>
+
+          {recurring && (
+            <div className="ml-6 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
+              <label
+                htmlFor="add-expense-end-month"
+                className="block text-xs font-heading font-medium text-slate-600"
+              >
+                สิ้นสุดเดือนไหน (เริ่มตั้งแต่ {activeMonth})
+              </label>
+              <select
+                id="add-expense-end-month"
+                value={recurringEndMonth}
+                onChange={(e) => setRecurringEndMonth(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+              >
+                <option value="">
+                  ไม่กำหนดสิ้นสุด (ทุกเดือนตั้งแต่ {activeMonth} เป็นต้นไป)
+                </option>
+                {futureOptions.map((opt) => (
+                  <option key={opt.month} value={opt.month}>
+                    {opt.countFromActive === 1
+                      ? `${opt.month} (เฉพาะเดือนนี้ · 1 เดือน)`
+                      : `สิ้นสุด ${opt.month} (รวม ${opt.countFromActive} เดือน${
+                          opt.isExisting ? '' : ' · เดือนในอนาคต'
+                        })`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
             <input
@@ -432,6 +481,7 @@ export const AddMonthModal: React.FC<AddMonthModalProps> = ({
 
 interface EditExpenseModalProps {
   isOpen: boolean;
+  months: string[];
   activeMonth: string;
   expense: {
     id: number;
@@ -440,6 +490,7 @@ interface EditExpenseModalProps {
     note: string;
     category: BudgetCategory;
     isPaid: boolean;
+    recurringEndMonth?: string;
   } | null;
   onClose: () => void;
   onSubmit: (data: {
@@ -450,11 +501,13 @@ interface EditExpenseModalProps {
     category: BudgetCategory;
     paid: boolean;
     applyFutureMonths: boolean;
+    recurringEndMonth: string;
   }) => void;
 }
 
 export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   isOpen,
+  months,
   activeMonth,
   expense,
   onClose,
@@ -466,6 +519,12 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   const [category, setCategory] = useState<BudgetCategory>('ค่าใช้จ่ายจำเป็น (40%)');
   const [paid, setPaid] = useState(false);
   const [applyFutureMonths, setApplyFutureMonths] = useState(false);
+  const [recurringEndMonth, setRecurringEndMonth] = useState('');
+
+  const futureOptions = useMemo(
+    () => buildFutureMonthSequence(months, activeMonth, 12),
+    [months, activeMonth]
+  );
 
   useEffect(() => {
     if (isOpen && expense) {
@@ -482,6 +541,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       setCategory(normalizedCat);
       setPaid(expense.isPaid);
       setApplyFutureMonths(false);
+      setRecurringEndMonth(expense.recurringEndMonth || '');
     }
   }, [isOpen, expense]);
 
@@ -499,6 +559,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       category,
       paid,
       applyFutureMonths,
+      recurringEndMonth: applyFutureMonths ? recurringEndMonth : '',
     });
     onClose();
   };
@@ -593,6 +654,36 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
             />
             <span>ใช้จำนวนเงินนี้กับเดือนถัดไปทั้งหมดด้วย</span>
           </label>
+
+          {applyFutureMonths && (
+            <div className="ml-6 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
+              <label
+                htmlFor="edit-expense-end-month"
+                className="block text-xs font-heading font-medium text-slate-600"
+              >
+                สิ้นสุดเดือนไหน (เริ่มตั้งแต่ {activeMonth})
+              </label>
+              <select
+                id="edit-expense-end-month"
+                value={recurringEndMonth}
+                onChange={(e) => setRecurringEndMonth(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+              >
+                <option value="">
+                  ไม่กำหนดสิ้นสุด (ทุกเดือนตั้งแต่ {activeMonth} เป็นต้นไป)
+                </option>
+                {futureOptions.map((opt) => (
+                  <option key={opt.month} value={opt.month}>
+                    {opt.countFromActive === 1
+                      ? `${opt.month} (เฉพาะเดือนนี้ · 1 เดือน)`
+                      : `สิ้นสุด ${opt.month} (รวม ${opt.countFromActive} เดือน${
+                          opt.isExisting ? '' : ' · เดือนในอนาคต'
+                        })`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
             <input

@@ -444,3 +444,32 @@ export function suggestNextThaiMonth(months: string[]): string {
   }
   return '';
 }
+
+export function buildFutureMonthSequence(
+  months: string[],
+  activeMonth: string,
+  extraFutureCount = 12
+): { month: string; isExisting: boolean; countFromActive: number }[] {
+  const startIdx = Math.max(0, months.indexOf(activeMonth));
+  const existingFromActive = months.slice(startIdx);
+  const result: { month: string; isExisting: boolean; countFromActive: number }[] =
+    existingFromActive.map((m, idx) => ({
+      month: m,
+      isExisting: true,
+      countFromActive: idx + 1,
+    }));
+
+  const workingMonths = [...months];
+  for (let i = 0; i < extraFutureCount; i++) {
+    const next = suggestNextThaiMonth(workingMonths);
+    if (!next || workingMonths.includes(next)) break;
+    workingMonths.push(next);
+    result.push({
+      month: next,
+      isExisting: false,
+      countFromActive: result.length + 1,
+    });
+  }
+
+  return result;
+}

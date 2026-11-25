@@ -25,6 +25,7 @@ export interface ExpenseItem {
   category: BudgetCategory;
   amounts: Record<string, number>;
   paid: Record<string, boolean>;
+  recurringEndMonth?: string;
 }
 
 export type ActiveTab = 'dashboard' | 'transactions' | 'projection';

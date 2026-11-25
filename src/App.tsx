@@ -20,6 +20,7 @@ import {
 import {
   DEFAULT_BUDGET_STATE,
   STORAGE_KEY,
+  buildFutureMonthSequence,
   suggestNextThaiMonth,
 } from './data/defaultBudget';
 import {
@@ -437,10 +438,16 @@ export default function App() {
     category: BudgetCategory;
     paid: boolean;
     applyFutureMonths: boolean;
+    recurringEndMonth: string;
   }) => {
     setState((prev) => {
       const m = prev.activeMonth;
       const startIdx = prev.months.indexOf(m);
+      const futureSeq = buildFutureMonthSequence(prev.months, m, 12);
+      const endIdxInSeq = data.recurringEndMonth
+        ? futureSeq.findIndex((item) => item.month === data.recurringEndMonth)
+        : -1;
+
       return {
         ...prev,
         expenses: prev.expenses.map((exp) => {
@@ -449,9 +456,24 @@ export default function App() {
           if (data.applyFutureMonths && startIdx >= 0) {
             prev.months.forEach((mon, idx) => {
               if (idx >= startIdx) {
-                nextAmounts[mon] = data.amount;
+                if (!data.recurringEndMonth) {
+                  nextAmounts[mon] = data.amount;
+                } else {
+                  const seqIdx = futureSeq.findIndex((item) => item.month === mon);
+                  nextAmounts[mon] =
+                    endIdxInSeq >= 0 && seqIdx >= 0 && seqIdx <= endIdxInSeq
+                      ? data.amount
+                      : 0;
+                }
               }
             });
+            if (data.recurringEndMonth && endIdxInSeq >= 0) {
+              futureSeq.forEach((item, idx) => {
+                if (!item.isExisting) {
+                  nextAmounts[item.month] = idx <= endIdxInSeq ? data.amount : 0;
+                }
+              });
+            }
           } else {
             nextAmounts[m] = data.amount;
           }
@@ -462,6 +484,9 @@ export default function App() {
             category: data.category,
             amounts: nextAmounts,
             paid: { ...exp.paid, [m]: data.paid },
+            recurringEndMonth: data.applyFutureMonths
+              ? data.recurringEndMonth || undefined
+              : exp.recurringEndMonth,
           };
         }),
       };
@@ -492,20 +517,44 @@ export default function App() {
     note: string;
     category: BudgetCategory;
     recurring: boolean;
+    recurringEndMonth: string;
     paid: boolean;
   }) => {
     setState((prev) => {
       const startIdx = prev.months.indexOf(prev.activeMonth);
+      const futureSeq = buildFutureMonthSequence(prev.months, prev.activeMonth, 12);
+      const endIdxInSeq = data.recurringEndMonth
+        ? futureSeq.findIndex((item) => item.month === data.recurringEndMonth)
+        : -1;
+
       const amounts: Record<string, number> = {};
       prev.months.forEach((mon, idx) => {
-        if (data.recurring && idx >= startIdx) {
-          amounts[mon] = data.amount;
+        if (idx < startIdx) {
+          amounts[mon] = 0;
         } else if (mon === prev.activeMonth) {
           amounts[mon] = data.amount;
+        } else if (data.recurring) {
+          if (!data.recurringEndMonth) {
+            amounts[mon] = data.amount;
+          } else {
+            const seqIdx = futureSeq.findIndex((item) => item.month === mon);
+            amounts[mon] =
+              endIdxInSeq >= 0 && seqIdx >= 0 && seqIdx <= endIdxInSeq
+                ? data.amount
+                : 0;
+          }
         } else {
           amounts[mon] = 0;
         }
       });
+
+      if (data.recurring && data.recurringEndMonth && endIdxInSeq >= 0) {
+        futureSeq.forEach((item, idx) => {
+          if (!item.isExisting) {
+            amounts[item.month] = idx <= endIdxInSeq ? data.amount : 0;
+          }
+        });
+      }
 
       const nextId =
         prev.expenses.reduce((max, item) => Math.max(max, item.id), 0) + 1;
@@ -521,6 +570,10 @@ export default function App() {
             category: data.category,
             amounts,
             paid: { [prev.activeMonth]: data.paid },
+            recurringEndMonth:
+              data.recurring && data.recurringEndMonth
+                ? data.recurringEndMonth
+                : undefined,
           },
         ],
       };
@@ -561,17 +614,33 @@ export default function App() {
         extras: [],
       };
 
-      const nextExpenses = prev.expenses.map((exp) => ({
-        ...exp,
-        amounts: {
-          ...exp.amounts,
-          [newMonth]: copyPrev ? Number(exp.amounts[prevMonth]) || 0 : 0,
-        },
-        paid: {
-          ...exp.paid,
-          [newMonth]: false,
-        },
-      }));
+      const nextExpenses = prev.expenses.map((exp) => {
+        const hasPreScheduled = Object.prototype.hasOwnProperty.call(
+          exp.amounts,
+          newMonth
+        );
+        const endedAtPrev =
+          !!exp.recurringEndMonth && exp.recurringEndMonth === prevMonth;
+        const nextAmt = hasPreScheduled
+          ? Number(exp.amounts[newMonth]) || 0
+          : endedAtPrev
+          ? 0
+          : copyPrev
+          ? Number(exp.amounts[prevMonth]) || 0
+          : 0;
+
+        return {
+          ...exp,
+          amounts: {
+            ...exp.amounts,
+            [newMonth]: nextAmt,
+          },
+          paid: {
+            ...exp.paid,
+            [newMonth]: false,
+          },
+        };
+      });
 
       return {
         ...prev,
@@ -1072,6 +1141,8 @@ export default function App() {
 
       <AddExpenseModal
         isOpen={isExpenseModalOpen}
+        months={state.months}
+        activeMonth={state.activeMonth}
         onClose={() => setIsExpenseModalOpen(false)}
         onSubmit={handleAddExpense}
       />
@@ -1092,6 +1163,7 @@ export default function App() {
 
       <EditExpenseModal
         isOpen={!!editingExpense}
+        months={state.months}
         activeMonth={state.activeMonth}
         expense={editingExpense}
         onClose={() => setEditingExpense(null)}
