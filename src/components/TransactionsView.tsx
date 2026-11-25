@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Trash2 } from 'lucide-react';
-import { BudgetState } from '../types/budget';
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { BudgetState, ExtraIncomeItem, MonthExpenseView } from '../types/budget';
 import { EXPENSE_CATEGORY_OPTIONS, fmt, getMonthExpenses, getMonthIncome } from '../data/defaultBudget';
 
 interface TransactionsViewProps {
   state: BudgetState;
   onUpdateBaseIncome: (salary: number, side: number) => void;
+  onEditExtraIncome: (index: number, item: ExtraIncomeItem) => void;
   onDeleteExtraIncome: (index: number) => void;
   onTogglePaid: (expenseId: number) => void;
+  onEditExpense: (item: MonthExpenseView) => void;
   onRequestDeleteExpense: (expenseId: number, name: string) => void;
   onOpenIncomeModal: () => void;
   onOpenExpenseModal: () => void;
@@ -16,8 +18,10 @@ interface TransactionsViewProps {
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   state,
   onUpdateBaseIncome,
+  onEditExtraIncome,
   onDeleteExtraIncome,
   onTogglePaid,
+  onEditExpense,
   onRequestDeleteExpense,
   onOpenIncomeModal,
   onOpenExpenseModal,
@@ -141,6 +145,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     </span>
                     <button
                       type="button"
+                      onClick={() => onEditExtraIncome(idx, ex)}
+                      className="text-xs text-[#006A63] hover:underline"
+                    >
+                      แก้ไข
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => onDeleteExtraIncome(idx)}
                       className="text-xs text-rose-600 hover:underline"
                     >
@@ -246,7 +257,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 <th className="py-3 px-3">หมวดหมู่ (40-30-20-10)</th>
                 <th className="py-3 px-3">ครบกำหนด / หมายเหตุ</th>
                 <th className="py-3 px-3 text-right">จำนวนเงิน (บาท)</th>
-                <th className="py-3 px-3 rounded-tr-lg text-center w-20">จัดการ</th>
+                <th className="py-3 px-3 rounded-tr-lg text-center w-24">จัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -292,14 +303,26 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       ฿{fmt(item.amount)}
                     </td>
                     <td className="py-2.5 px-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => onRequestDeleteExpense(item.id, item.name)}
-                        className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-rose-600 px-2 py-1 rounded-md hover:bg-rose-50 transition"
-                        aria-label={`ลบ ${item.name}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="inline-flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onEditExpense(item)}
+                          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-[#006A63] px-2 py-1 rounded-md hover:bg-[#E6F3F2] transition"
+                          aria-label={`แก้ไข ${item.name}`}
+                          title="แก้ไขรายการ"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onRequestDeleteExpense(item.id, item.name)}
+                          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-rose-600 px-2 py-1 rounded-md hover:bg-rose-50 transition"
+                          aria-label={`ลบ ${item.name}`}
+                          title="ลบรายการ"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

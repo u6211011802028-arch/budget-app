@@ -13,6 +13,7 @@ import {
   ActiveTab,
   BudgetCategory,
   BudgetState,
+  MonthExpenseView,
   SheetConnection,
 } from './types/budget';
 import {
@@ -46,6 +47,8 @@ import {
   AddExpenseModal,
   AddIncomeModal,
   AddMonthModal,
+  EditExpenseModal,
+  EditExtraIncomeModal,
 } from './components/BudgetModals';
 
 const SHEET_PREF_KEY = 'thai_budget_sheet_pref_v1';
@@ -100,9 +103,9 @@ type ConfirmAction =
 export default function App() {
   const [state, setState] = useState<BudgetState>(loadBudgetState);
 
-  // Google Auth State (token lives strictly in-memory via googleAuth.ts)
+  // Google Auth State (persisted via browserLocalPersistence + localStorage token cache)
   const [user, setUser] = useState<User | null>(null);
-  const [needsAuth, setNeedsAuth] = useState<boolean>(true);
+  const [needsAuth, setNeedsAuth] = useState<boolean>(() => !getAccessToken());
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
   // Google Sheets Connection State
@@ -116,6 +119,12 @@ export default function App() {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
   const [isAddMonthModalOpen, setIsAddMonthModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<MonthExpenseView | null>(null);
+  const [editingExtraIncome, setEditingExtraIncome] = useState<{
+    index: number;
+    name: string;
+    amount: number;
+  } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [isConfirmLoading, setIsConfirmLoading] = useState(false);
 
@@ -249,20 +258,35 @@ export default function App() {
     []
   );
 
+  const hasAutoReconnectedRef = useRef(false);
+
   // Initialize Firebase Auth state listener
   useEffect(() => {
     const unsubscribe = initAuth(
       (authedUser) => {
         setUser(authedUser);
         setNeedsAuth(false);
+
+        if (!hasAutoReconnectedRef.current) {
+          hasAutoReconnectedRef.current = true;
+          const savedPref = loadSheetPref();
+          if (savedPref?.spreadsheetId) {
+            syncFromSpreadsheet(
+              savedPref.spreadsheetId,
+              savedPref.selectedSheetTitle,
+              savedPref.autoRefreshSec
+            );
+          }
+        }
       },
       (existingUser) => {
         setUser(existingUser);
         setNeedsAuth(true);
+        hasAutoReconnectedRef.current = false;
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [syncFromSpreadsheet]);
 
   // Real-time auto-refresh polling from connected Google Sheet
   useEffect(() => {
@@ -290,6 +314,7 @@ export default function App() {
       // Reconnect saved Google Sheet preference automatically if available
       const savedPref = loadSheetPref();
       if (savedPref?.spreadsheetId) {
+        hasAutoReconnectedRef.current = true;
         await syncFromSpreadsheet(
           savedPref.spreadsheetId,
           savedPref.selectedSheetTitle,
@@ -388,6 +413,63 @@ export default function App() {
       if (!existing) return prev;
       const nextExtras = [...existing.extras];
       nextExtras.splice(index, 1);
+      return {
+        ...prev,
+        incomes: {
+          ...prev.incomes,
+          [m]: { ...existing, extras: nextExtras },
+        },
+      };
+    });
+  };
+
+  const handleEditExpense = (data: {
+    id: number;
+    name: string;
+    amount: number;
+    note: string;
+    category: BudgetCategory;
+    paid: boolean;
+    applyFutureMonths: boolean;
+  }) => {
+    setState((prev) => {
+      const m = prev.activeMonth;
+      const startIdx = prev.months.indexOf(m);
+      return {
+        ...prev,
+        expenses: prev.expenses.map((exp) => {
+          if (exp.id !== data.id) return exp;
+          const nextAmounts = { ...exp.amounts };
+          if (data.applyFutureMonths && startIdx >= 0) {
+            prev.months.forEach((mon, idx) => {
+              if (idx >= startIdx) {
+                nextAmounts[mon] = data.amount;
+              }
+            });
+          } else {
+            nextAmounts[m] = data.amount;
+          }
+          return {
+            ...exp,
+            name: data.name,
+            note: data.note,
+            category: data.category,
+            amounts: nextAmounts,
+            paid: { ...exp.paid, [m]: data.paid },
+          };
+        }),
+      };
+    });
+  };
+
+  const handleEditExtraIncome = (index: number, name: string, amount: number) => {
+    setState((prev) => {
+      const m = prev.activeMonth;
+      const existing = prev.incomes[m];
+      if (!existing) return prev;
+      const nextExtras = [...existing.extras];
+      if (!nextExtras[index]) return prev;
+      nextExtras[index] = { name, amount };
       return {
         ...prev,
         incomes: {
@@ -938,8 +1020,12 @@ export default function App() {
           <TransactionsView
             state={state}
             onUpdateBaseIncome={handleUpdateBaseIncome}
+            onEditExtraIncome={(index, item) =>
+              setEditingExtraIncome({ index, name: item.name, amount: item.amount })
+            }
             onDeleteExtraIncome={handleDeleteExtraIncome}
             onTogglePaid={handleTogglePaid}
+            onEditExpense={(item) => setEditingExpense(item)}
             onRequestDeleteExpense={(id, name) =>
               setConfirmAction({ type: 'delete-expense', id, name })
             }
@@ -992,6 +1078,21 @@ export default function App() {
         existingMonths={state.months}
         onClose={() => setIsAddMonthModalOpen(false)}
         onSubmit={handleAddMonth}
+      />
+
+      <EditExpenseModal
+        isOpen={!!editingExpense}
+        activeMonth={state.activeMonth}
+        expense={editingExpense}
+        onClose={() => setEditingExpense(null)}
+        onSubmit={handleEditExpense}
+      />
+
+      <EditExtraIncomeModal
+        isOpen={!!editingExtraIncome}
+        extraIncome={editingExtraIncome}
+        onClose={() => setEditingExtraIncome(null)}
+        onSubmit={handleEditExtraIncome}
       />
 
       <ConfirmModal

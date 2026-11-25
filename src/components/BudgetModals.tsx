@@ -429,3 +429,296 @@ export const AddMonthModal: React.FC<AddMonthModalProps> = ({
     </div>
   );
 };
+
+interface EditExpenseModalProps {
+  isOpen: boolean;
+  activeMonth: string;
+  expense: {
+    id: number;
+    name: string;
+    amount: number;
+    note: string;
+    category: BudgetCategory;
+    isPaid: boolean;
+  } | null;
+  onClose: () => void;
+  onSubmit: (data: {
+    id: number;
+    name: string;
+    amount: number;
+    note: string;
+    category: BudgetCategory;
+    paid: boolean;
+    applyFutureMonths: boolean;
+  }) => void;
+}
+
+export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
+  isOpen,
+  activeMonth,
+  expense,
+  onClose,
+  onSubmit,
+}) => {
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [category, setCategory] = useState<BudgetCategory>('ค่าใช้จ่ายจำเป็น (40%)');
+  const [paid, setPaid] = useState(false);
+  const [applyFutureMonths, setApplyFutureMonths] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && expense) {
+      setName(expense.name);
+      setAmount(String(expense.amount));
+      setNote(expense.note === '-' ? '' : expense.note);
+      setCategory(expense.category);
+      setPaid(expense.isPaid);
+      setApplyFutureMonths(false);
+    }
+  }, [isOpen, expense]);
+
+  if (!isOpen || !expense) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const numAmt = Number(amount);
+    if (!name.trim() || isNaN(numAmt) || numAmt < 0) return;
+    onSubmit({
+      id: expense.id,
+      name: name.trim(),
+      amount: numAmt,
+      note: note.trim() || '-',
+      category,
+      paid,
+      applyFutureMonths,
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/55 backdrop-blur-[2px] flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="bg-white rounded-xl max-w-md w-full p-6 border border-slate-200 shadow-lg">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-heading font-bold text-slate-900">
+            แก้ไขรายการค่าใช้จ่าย · {activeMonth}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+            aria-label="ปิด"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          <div>
+            <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+              ชื่อรายการค่าใช้จ่าย *
+            </label>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+                จำนวนเงิน (บาท) *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-[#006A63]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+                วันครบกำหนด / หมายเหตุ
+              </label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="เช่น วันที่ 25"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+              หมวดหมู่ตามสูตร 40-30-20-10
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as BudgetCategory)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+            >
+              {EXPENSE_CATEGORY_OPTIONS.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={applyFutureMonths}
+              onChange={(e) => setApplyFutureMonths(e.target.checked)}
+              className="w-4 h-4 accent-[#006A63] rounded"
+            />
+            <span>ใช้จำนวนเงินนี้กับเดือนถัดไปทั้งหมดด้วย</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={paid}
+              onChange={(e) => setPaid(e.target.checked)}
+              className="w-4 h-4 accent-[#006A63] rounded"
+            />
+            <span>ชำระเงินแล้ว</span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-heading text-slate-600 hover:bg-slate-100"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-[#006A63] hover:bg-[#004D48] text-white"
+            >
+              บันทึกการแก้ไข
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface EditExtraIncomeModalProps {
+  isOpen: boolean;
+  extraIncome: { index: number; name: string; amount: number } | null;
+  onClose: () => void;
+  onSubmit: (index: number, name: string, amount: number) => void;
+}
+
+export const EditExtraIncomeModal: React.FC<EditExtraIncomeModalProps> = ({
+  isOpen,
+  extraIncome,
+  onClose,
+  onSubmit,
+}) => {
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+
+  useEffect(() => {
+    if (isOpen && extraIncome) {
+      setName(extraIncome.name);
+      setAmount(String(extraIncome.amount));
+    }
+  }, [isOpen, extraIncome]);
+
+  if (!isOpen || !extraIncome) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const numAmt = Number(amount);
+    if (!name.trim() || isNaN(numAmt) || numAmt < 0) return;
+    onSubmit(extraIncome.index, name.trim(), numAmt);
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/55 backdrop-blur-[2px] flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="bg-white rounded-xl max-w-md w-full p-6 border border-slate-200 shadow-lg">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-heading font-bold text-slate-900">
+            แก้ไขรายการรายรับพิเศษ
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+            aria-label="ปิด"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          <div>
+            <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+              ชื่อรายการรายรับ *
+            </label>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+              จำนวนเงิน (บาท) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-heading text-slate-600 hover:bg-slate-100"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              บันทึกการแก้ไข
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
