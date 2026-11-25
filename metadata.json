@@ -2,5 +2,7 @@
   "name": "วางแผนการเงินและงบประมาณรายเดือน (40-30-20-10)",
   "description": "ระบบบันทึกรายรับ-รายจ่ายอัตโนมัติเชื่อมต่อ Google Sheets พร้อมแดชบอร์ดกราฟสรุปสถานะทางการเงินแบบเรียลไทม์ตามสูตร 40-30-20-10",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

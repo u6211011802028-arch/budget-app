@@ -1,8 +1,11 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  Auth,
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   getAuth,
   GoogleAuthProvider,
+  initializeAuth,
   onAuthStateChanged,
   setPersistence,
   signInWithPopup,
@@ -20,21 +23,28 @@ const TOKEN_STORAGE_KEY = 'google_oauth_token_cache_v1';
 const DEFAULT_TOKEN_TTL_SEC = 3600;
 const EXPIRY_SAFETY_BUFFER_MS = 60 * 1000;
 
-interface StoredOAuthToken {
+export interface StoredOAuthToken {
   accessToken: string;
   expiresAt: number;
   uid?: string;
+  displayName?: string | null;
+  email?: string | null;
 }
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
 
-// Ensure Firebase Auth persists session in localStorage across refreshes and browser restarts
-const persistenceReady = setPersistence(auth, browserLocalPersistence).catch(
-  (err) => {
-    console.error('Failed to set browserLocalPersistence:', err);
-  }
-);
+let auth: Auth;
+try {
+  auth = initializeAuth(app, {
+    persistence: browserLocalPersistence,
+    popupRedirectResolver: browserPopupRedirectResolver,
+  });
+} catch {
+  auth = getAuth(app);
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.error('Failed to enforce browserLocalPersistence:', err);
+  });
+}
 
 const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => provider.addScope(scope));
@@ -49,19 +59,25 @@ let cachedExpiresAt = 0;
 function saveTokenToStorage(
   accessToken: string,
   expiresAt: number,
-  uid?: string
+  user?: User | null
 ) {
   cachedAccessToken = accessToken;
   cachedExpiresAt = expiresAt;
   try {
-    const payload: StoredOAuthToken = { accessToken, expiresAt, uid };
+    const payload: StoredOAuthToken = {
+      accessToken,
+      expiresAt,
+      uid: user?.uid,
+      displayName: user?.displayName ?? null,
+      email: user?.email ?? null,
+    };
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // ignore storage quota errors
   }
 }
 
-function loadTokenFromStorage(expectedUid?: string): StoredOAuthToken | null {
+export function loadTokenFromStorage(expectedUid?: string): StoredOAuthToken | null {
   try {
     const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!raw) return null;
@@ -105,36 +121,58 @@ if (initialStored) {
   cachedExpiresAt = initialStored.expiresAt;
 }
 
+export const getStoredUserProfile = (): {
+  displayName: string | null;
+  email: string | null;
+} | null => {
+  const stored = loadTokenFromStorage();
+  if (!stored) return null;
+  return {
+    displayName: stored.displayName ?? null,
+    email: stored.email ?? null,
+  };
+};
+
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: (user: User | null) => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    await persistenceReady;
+  let cancelled = false;
 
-    if (user) {
+  const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+    await auth.authStateReady();
+    if (cancelled) return;
+
+    const currentUser = user ?? auth.currentUser;
+
+    if (currentUser) {
       if (cachedAccessToken && Date.now() < cachedExpiresAt) {
-        onAuthSuccess?.(user, cachedAccessToken);
+        onAuthSuccess?.(currentUser, cachedAccessToken);
         return;
       }
 
-      const stored = loadTokenFromStorage(user.uid);
+      const stored = loadTokenFromStorage(currentUser.uid);
       if (stored) {
         cachedAccessToken = stored.accessToken;
         cachedExpiresAt = stored.expiresAt;
-        onAuthSuccess?.(user, stored.accessToken);
+        onAuthSuccess?.(currentUser, stored.accessToken);
         return;
       }
 
       if (!isSigningIn) {
         removeTokenFromStorage();
-        onAuthFailure?.(user);
+        onAuthFailure?.(currentUser);
       }
-    } else {
+    } else if (!isSigningIn) {
       removeTokenFromStorage();
       onAuthFailure?.(null);
     }
   });
+
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 };
 
 export const googleSignIn = async (): Promise<{
@@ -164,7 +202,7 @@ export const googleSignIn = async (): Promise<{
     const expiresAt =
       Date.now() + ttlSeconds * 1000 - EXPIRY_SAFETY_BUFFER_MS;
 
-    saveTokenToStorage(credential.accessToken, expiresAt, result.user.uid);
+    saveTokenToStorage(credential.accessToken, expiresAt, result.user);
     return { user: result.user, accessToken: credential.accessToken };
   } finally {
     isSigningIn = false;

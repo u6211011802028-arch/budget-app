@@ -24,6 +24,7 @@ import {
 import {
   clearCachedToken,
   getAccessToken,
+  getStoredUserProfile,
   googleSignIn,
   initAuth,
   logout,
@@ -811,7 +812,10 @@ export default function App() {
             ) : (
               <div className="flex items-center gap-2.5">
                 <span className="hidden md:inline text-xs text-teal-100 whitespace-nowrap max-w-[160px] truncate">
-                  {user?.displayName || user?.email}
+                  {user?.displayName ||
+                    user?.email ||
+                    getStoredUserProfile()?.displayName ||
+                    getStoredUserProfile()?.email}
                 </span>
                 <button
                   type="button"
