@@ -1,0 +1,923 @@
+import React, { useMemo, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Clock,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
+import { BudgetState } from '../types/budget';
+import {
+  BUDGET_CATEGORIES,
+  RECOVERY_ROADMAP,
+  fmt,
+  fmtCompact,
+  getMonthExpenses,
+  getMonthIncome,
+} from '../data/defaultBudget';
+
+interface DashboardViewProps {
+  state: BudgetState;
+  onTogglePaid: (expenseId: number) => void;
+  onOpenIncomeModal: () => void;
+  onSwitchToTransactions: () => void;
+}
+
+type ProportionStatusLevel = 'on-target' | 'warning' | 'off-target';
+
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  state,
+  onTogglePaid,
+  onOpenIncomeModal,
+  onSwitchToTransactions,
+}) => {
+  const [proportionBasis, setProportionBasis] = useState<'income' | 'expense'>('income');
+
+  const m = state.activeMonth;
+  const incData = useMemo(() => getMonthIncome(state, m), [state, m]);
+  const exps = useMemo(() => getMonthExpenses(state, m), [state, m]);
+
+  const totalExpense = useMemo(
+    () => exps.reduce((sum, e) => sum + e.amount, 0),
+    [exps]
+  );
+  const paidExps = useMemo(() => exps.filter((e) => e.isPaid), [exps]);
+  const unpaidExps = useMemo(() => exps.filter((e) => !e.isPaid), [exps]);
+  const unpaidTotal = useMemo(
+    () => unpaidExps.reduce((sum, e) => sum + e.amount, 0),
+    [unpaidExps]
+  );
+
+  const net = incData.total - totalExpense;
+  const expPct = incData.total > 0 ? (totalExpense / incData.total) * 100 : 0;
+
+  // 40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล
+  const proportionAudit = useMemo(() => {
+    const baseAmount =
+      proportionBasis === 'income'
+        ? incData.total > 0
+          ? incData.total
+          : totalExpense
+        : totalExpense;
+
+    const sumCats = (names: string[]) =>
+      exps
+        .filter((e) => names.includes(e.category))
+        .reduce((s, e) => s + e.amount, 0);
+
+    const essentialAmt = sumCats(['ค่าใช้จ่ายจำเป็น (40%)']);
+    const wealthAmt = sumCats(['สร้างความมั่งคั่ง (30%)', 'เงินออม + ลงทุน (20%)']);
+    const debtAmt = sumCats(['ภาระผ่อนหนี้ (30%)']);
+    const personalAmt = sumCats(['ความต้องการส่วนตัว (20%)', 'เงินใช้ส่วนตัว (10%)']);
+    const charityAmt = sumCats(['บริจาค / การกุศล (10%)']);
+
+    const makeItem = (
+      key: string,
+      title: string,
+      subtitle: string,
+      targetRatio: number,
+      actualAmt: number,
+      mode: 'max-cap' | 'min-goal',
+      extraNote?: string
+    ) => {
+      const targetAmt = baseAmount * targetRatio;
+      const targetPct = targetRatio * 100;
+      const actualPct = baseAmount > 0 ? (actualAmt / baseAmount) * 100 : 0;
+
+      let status: ProportionStatusLevel;
+      let statusLabel: string;
+
+      if (mode === 'max-cap') {
+        if (actualPct <= targetPct) {
+          status = 'on-target';
+          statusLabel = `ตรงตามสัดส่วน (≤ ${targetPct}%)`;
+        } else if (actualPct <= targetPct + 6) {
+          status = 'warning';
+          statusLabel = `เกินสัดส่วนเล็กน้อย`;
+        } else {
+          status = 'off-target';
+          statusLabel = `เกินสัดส่วน ${targetPct}%`;
+        }
+      } else {
+        if (actualPct >= targetPct) {
+          status = 'on-target';
+          statusLabel = `ถึงเป้าหมาย (≥ ${targetPct}%)`;
+        } else if (actualPct >= targetPct * 0.5) {
+          status = 'warning';
+          statusLabel = `ใกล้เป้าหมาย ${targetPct}%`;
+        } else {
+          status = 'off-target';
+          statusLabel = actualAmt === 0 ? `ยังไม่มีรายการ (เป้า ${targetPct}%)` : `ต่ำกว่าเกณฑ์ ${targetPct}%`;
+        }
+      }
+
+      const diff = mode === 'max-cap' ? targetAmt - actualAmt : actualAmt - targetAmt;
+
+      return {
+        key,
+        title,
+        subtitle,
+        targetPct,
+        targetAmt,
+        actualAmt,
+        actualPct,
+        mode,
+        status,
+        statusLabel,
+        diff,
+        extraNote,
+      };
+    };
+
+    const items = [
+      makeItem(
+        'essential',
+        '40% · จำเป็น',
+        'ค่าใช้จ่ายจำเป็นในชีวิตประจำวัน',
+        0.4,
+        essentialAmt,
+        'max-cap'
+      ),
+      makeItem(
+        'wealth',
+        '30% · สร้างความมั่งคั่ง',
+        'เงินออม การลงทุน และสร้างทรัพย์สิน',
+        0.3,
+        wealthAmt,
+        'min-goal',
+        debtAmt > 0 ? `มีภาระผ่อนหนี้แยกอีก ฿${fmtCompact(debtAmt)}` : undefined
+      ),
+      makeItem(
+        'personal',
+        '20% · ความต้องการส่วนตัว',
+        'ไลฟ์สไตล์ ท่องเที่ยว และของขวัญ',
+        0.2,
+        personalAmt,
+        'max-cap'
+      ),
+      makeItem(
+        'charity',
+        '10% · บริจาค/การกุศล',
+        'การให้ ทำบุญ และช่วยเหลือสังคม',
+        0.1,
+        charityAmt,
+        'min-goal'
+      ),
+    ];
+
+    const matchedCount = items.filter((i) => i.status === 'on-target').length;
+
+    return {
+      baseAmount,
+      items,
+      matchedCount,
+    };
+  }, [exps, incData.total, totalExpense, proportionBasis]);
+
+  // Monthly Trend Data for Real-time ComposedChart
+  const monthlyTrendData = useMemo(() => {
+    return state.months.map((mon) => {
+      const inc = getMonthIncome(state, mon).total;
+      const exp = getMonthExpenses(state, mon).reduce((s, e) => s + e.amount, 0);
+      return {
+        month: mon,
+        รายรับ: Number(inc.toFixed(2)),
+        รายจ่าย: Number(exp.toFixed(2)),
+        กระแสเงินสดสุทธิ: Number((inc - exp).toFixed(2)),
+      };
+    });
+  }, [state]);
+
+  // 40-30-20-10 Breakdown Data (supports both legacy & new category tags)
+  const categoryBreakdown = useMemo(() => {
+    return BUDGET_CATEGORIES.map((cat) => {
+      const actual = exps
+        .filter((e) => {
+          if (e.category === cat.name) return true;
+          if (
+            cat.name === 'เงินออม + ลงทุน (20%)' &&
+            e.category === 'สร้างความมั่งคั่ง (30%)'
+          ) {
+            return true;
+          }
+          if (
+            cat.name === 'เงินใช้ส่วนตัว (10%)' &&
+            (e.category === 'ความต้องการส่วนตัว (20%)' ||
+              e.category === 'บริจาค / การกุศล (10%)')
+          ) {
+            return true;
+          }
+          return false;
+        })
+        .reduce((s, e) => s + e.amount, 0);
+      const targetAmt = incData.total * cat.targetPct;
+      const actualPct = incData.total > 0 ? (actual / incData.total) * 100 : 0;
+      const diff = cat.isSavings ? actual - targetAmt : targetAmt - actual;
+      const isGood = cat.isSavings ? actual >= targetAmt : actual <= targetAmt;
+      return {
+        ...cat,
+        actual: Number(actual.toFixed(2)),
+        targetAmt: Number(targetAmt.toFixed(2)),
+        actualPct,
+        diff,
+        isGood,
+      };
+    });
+  }, [exps, incData.total]);
+
+  const pieData = useMemo(() => {
+    return categoryBreakdown
+      .filter((c) => c.actual > 0)
+      .map((c) => ({
+        name: c.shortName,
+        fullName: c.name,
+        value: c.actual,
+        color: c.color,
+        sharePct: totalExpense > 0 ? (c.actual / totalExpense) * 100 : 0,
+      }));
+  }, [categoryBreakdown, totalExpense]);
+
+  const targetVsActualData = useMemo(() => {
+    return categoryBreakdown.map((c) => ({
+      name: c.shortName,
+      งบเป้าหมาย: c.targetAmt,
+      ใช้จริง: c.actual,
+    }));
+  }, [categoryBreakdown]);
+
+  const statusStyles = {
+    'on-target': {
+      bar: 'bg-emerald-600',
+      tint: 'bg-emerald-50/70',
+      text: 'text-emerald-700',
+      dot: 'bg-emerald-600',
+      Icon: CheckCircle2,
+    },
+    warning: {
+      bar: 'bg-amber-500',
+      tint: 'bg-amber-50/70',
+      text: 'text-amber-700',
+      dot: 'bg-amber-500',
+      Icon: AlertTriangle,
+    },
+    'off-target': {
+      bar: 'bg-rose-600',
+      tint: 'bg-rose-50/70',
+      text: 'text-rose-700',
+      dot: 'bg-rose-600',
+      Icon: AlertCircle,
+    },
+  };
+
+  return (
+    <section className="space-y-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Income */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-heading font-medium text-slate-500">
+              รายรับรวม · {m}
+            </span>
+            <button
+              type="button"
+              onClick={onOpenIncomeModal}
+              className="text-xs text-[#006A63] hover:underline font-heading font-medium whitespace-nowrap"
+            >
+              + แก้ไข/เพิ่ม
+            </button>
+          </div>
+          <div className="text-2xl sm:text-3xl font-num font-bold text-slate-900 mt-2">
+            ฿{fmt(incData.total)}
+          </div>
+          <div className="text-xs text-slate-500 mt-2 truncate">
+            เงินเดือน ฿{fmtCompact(incData.salary)} · เสริม/อื่นๆ ฿
+            {fmtCompact(incData.side + incData.extrasTotal)}
+          </div>
+        </div>
+
+        {/* Total Expense */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-heading font-medium text-slate-500">
+              รายจ่ายรวม · {m}
+            </span>
+            <span
+              className={`inline-flex items-center gap-1 text-xs font-heading font-semibold ${
+                expPct > 100 ? 'text-orange-700' : 'text-[#0F766E]'
+              }`}
+            >
+              {expPct > 100 ? (
+                <AlertTriangle className="w-3.5 h-3.5" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              )}
+              {expPct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="text-2xl sm:text-3xl font-num font-bold text-slate-900 mt-2">
+            ฿{fmt(totalExpense)}
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            สัดส่วนเทียบกับรายรับทั้งหมดในเดือนนี้
+          </div>
+        </div>
+
+        {/* Net Cashflow */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-heading font-medium text-slate-500">
+              กระแสเงินสดสุทธิ
+            </span>
+            <span
+              className={`inline-flex items-center gap-1 text-xs font-heading font-semibold ${
+                net < 0 ? 'text-orange-700' : 'text-[#0F766E]'
+              }`}
+            >
+              {net < 0 ? (
+                <>
+                  <TrendingDown className="w-3.5 h-3.5" />
+                  <span>ติดลบ</span>
+                </>
+              ) : (
+                <>
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>เป็นบวก</span>
+                </>
+              )}
+            </span>
+          </div>
+          <div
+            className={`text-2xl sm:text-3xl font-num font-bold mt-2 ${
+              net < 0 ? 'text-orange-700' : 'text-[#0F766E]'
+            }`}
+          >
+            {net < 0 ? '-฿' : '+฿'}
+            {fmt(Math.abs(net))}
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            รายรับหักรายจ่ายทั้งหมดในเดือนนี้
+          </div>
+        </div>
+
+        {/* Payment Checklist Status */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-heading font-medium text-slate-500">
+              สถานะชำระบิล
+            </span>
+            <button
+              type="button"
+              onClick={onSwitchToTransactions}
+              className="inline-flex items-center gap-1 text-xs text-[#006A63] hover:underline font-heading font-medium whitespace-nowrap"
+            >
+              <span>ดูรายการ</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="text-2xl sm:text-3xl font-num font-bold text-[#006A63] mt-2">
+            {paidExps.length} / {exps.length}
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            รอชำระอีก ฿{fmt(unpaidTotal)}
+          </div>
+        </div>
+      </div>
+
+      {/* NEW: 40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล Status Strip */}
+      <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+                แถบตรวจสอบสัดส่วนรายจ่าย 40-30-20-10 · {m}
+              </h2>
+              <span className="text-xs font-heading font-medium text-slate-500">
+                ตรงตามสัดส่วน {proportionAudit.matchedCount} / 4 หมวด
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              คำนวณเทียบจาก
+              {proportionBasis === 'income' ? 'รายรับรวม' : 'รายจ่ายรวม'} ฿
+              {fmt(proportionAudit.baseAmount)} (40% จำเป็น · 30% สร้างความมั่งคั่ง · 20% ความต้องการส่วนตัว · 10% บริจาค/การกุศล)
+            </p>
+          </div>
+
+          <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => setProportionBasis('income')}
+              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
+                proportionBasis === 'income'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              เทียบรายรับรวม
+            </button>
+            <button
+              type="button"
+              onClick={() => setProportionBasis('expense')}
+              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-md whitespace-nowrap transition ${
+                proportionBasis === 'expense'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              เทียบรายจ่ายจริง
+            </button>
+          </div>
+        </div>
+
+        {/* 4-Category Color-Coded Status Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
+          {proportionAudit.items.map((item) => {
+            const st = statusStyles[item.status];
+            const StatusIcon = st.Icon;
+            const fillWidth = Math.min(
+              100,
+              item.targetPct > 0 ? (item.actualPct / item.targetPct) * 100 : 0
+            );
+
+            return (
+              <div key={item.key} className={`p-4 flex flex-col justify-between ${st.tint}`}>
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-heading font-bold text-slate-900">
+                      {item.title}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 text-xs font-heading font-semibold whitespace-nowrap ${st.text}`}
+                    >
+                      <StatusIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        {item.status === 'on-target'
+                          ? 'ปกติ'
+                          : item.status === 'warning'
+                          ? 'เฝ้าระวัง'
+                          : 'ไม่ตรงเกณฑ์'}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5 truncate">
+                    {item.subtitle}
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className={`text-xl font-num font-bold ${st.text}`}>
+                      {item.actualPct.toFixed(1)}%
+                    </span>
+                    <span className="text-xs font-num text-slate-500">
+                      เป้าหมาย {item.targetPct}%
+                    </span>
+                  </div>
+
+                  <div className="w-full h-2 bg-white/80 rounded-full overflow-hidden mt-1.5 border border-slate-200/70">
+                    <div
+                      className={`h-full ${st.bar} rounded-full transition-all duration-300`}
+                      style={{ width: `${fillWidth}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-slate-200/70 flex items-center justify-between text-xs gap-2">
+                  <span className="font-num font-semibold text-slate-800">
+                    ฿{fmt(item.actualAmt)}
+                  </span>
+                  <span className={`font-heading font-medium text-right ${st.text}`}>
+                    {item.statusLabel}
+                  </span>
+                </div>
+
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>
+                    เป้า ฿{fmtCompact(item.targetAmt)}
+                  </span>
+                  <span className="font-num">
+                    {item.mode === 'max-cap'
+                      ? item.diff >= 0
+                        ? `เหลืองบ ฿${fmtCompact(item.diff)}`
+                        : `เกินเป้า ฿${fmtCompact(Math.abs(item.diff))}`
+                      : item.diff >= 0
+                      ? `เกินเป้า +฿${fmtCompact(item.diff)}`
+                      : `ขาดอีก ฿${fmtCompact(Math.abs(item.diff))}`}
+                  </span>
+                </div>
+
+                {item.extraNote && (
+                  <div className="mt-1.5 text-[11px] text-slate-500">
+                    {item.extraNote}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Real-Time Interactive Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Monthly Income vs Expense & Net Cashflow Chart */}
+        <div className="lg:col-span-7 bg-white rounded-xl p-5 sm:p-6 border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
+            <div>
+              <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+                กราฟแนวโน้มรายรับ-รายจ่าย และกระแสเงินสดสุทธิ
+              </h2>
+              <p className="text-xs text-slate-500">
+                อัปเดตอัตโนมัติแบบเรียลไทม์ตามข้อมูลจาก Google Sheets และรายการที่บันทึก
+              </p>
+            </div>
+          </div>
+
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={monthlyTrendData}
+                margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 12, fill: '#475569', fontFamily: 'Prompt' }}
+                  axisLine={{ stroke: '#CBD5E1' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(v) => `฿${(Number(v) / 1000).toFixed(0)}k`}
+                  tick={{ fontSize: 11, fill: '#64748B', fontFamily: 'JetBrains Mono' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={56}
+                />
+                <Tooltip
+                  formatter={(value: any, name: any) => [
+                    `฿${fmt(Number(value) || 0)}`,
+                    String(name),
+                  ]}
+                  contentStyle={{
+                    borderRadius: '10px',
+                    border: '1px solid #E2E8F0',
+                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.08)',
+                    fontFamily: 'Sarabun, sans-serif',
+                    fontSize: '13px',
+                  }}
+                />
+                <Legend
+                  wrapperStyle={{ fontSize: '12px', fontFamily: 'Prompt, sans-serif' }}
+                />
+                <ReferenceLine y={0} stroke="#94A3B8" strokeDasharray="4 4" />
+                <Bar
+                  dataKey="รายรับ"
+                  fill="#006A63"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={32}
+                />
+                <Bar
+                  dataKey="รายจ่าย"
+                  fill="#F59E0B"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={32}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="กระแสเงินสดสุทธิ"
+                  stroke="#0F172A"
+                  strokeWidth={2.5}
+                  dot={{ r: 4, fill: '#0F172A', strokeWidth: 2, stroke: '#fff' }}
+                  activeDot={{ r: 6 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Donut Chart: Active Month 40-30-20-10 Allocation */}
+        <div className="lg:col-span-5 bg-white rounded-xl p-5 sm:p-6 border border-slate-200 flex flex-col">
+          <div>
+            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+              สัดส่วนค่าใช้จ่ายรายหมวดหมู่ · {m}
+            </h2>
+            <p className="text-xs text-slate-500">
+              แสดงสัดส่วนการใช้จ่ายจริงแยกตามกลุ่ม 40-30-20-10
+            </p>
+          </div>
+
+          {pieData.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-12 text-sm text-slate-400">
+              ยังไม่มีรายการรายจ่ายในเดือน {m}
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col justify-between mt-2">
+              <div className="h-52 w-full relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={82}
+                      paddingAngle={2}
+                    >
+                      {pieData.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: any, _name: any, props: any) => [
+                        `฿${fmt(Number(value) || 0)} (${props?.payload?.sharePct?.toFixed(1) || 0}%)`,
+                        props?.payload?.fullName || '',
+                      ]}
+                      contentStyle={{
+                        borderRadius: '10px',
+                        border: '1px solid #E2E8F0',
+                        fontSize: '12px',
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-[11px] font-heading text-slate-400">
+                    รายจ่ายรวม
+                  </span>
+                  <span className="text-sm font-num font-bold text-slate-900">
+                    ฿{fmtCompact(totalExpense)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-3 border-t border-slate-100 text-xs">
+                {categoryBreakdown.map((cat) => (
+                  <div key={cat.name} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-sm shrink-0"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                      <span className="text-slate-600 truncate">{cat.shortName}</span>
+                    </div>
+                    <span className="font-num font-semibold text-slate-800 shrink-0">
+                      {cat.actualPct.toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 40-30-20-10 Target vs Actual Analysis + Unpaid Bills + Recovery Plan */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: 40-30-20-10 Breakdown + Bar Chart + Table */}
+        <div className="lg:col-span-7 bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-5">
+          <div>
+            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+              สัดส่วนงบประมาณจริง vs สูตร 40-30-20-10
+            </h2>
+            <p className="text-xs text-slate-500">
+              เปรียบเทียบยอดใช้จ่ายจริงกับเพดานงบประมาณที่แนะนำจากรายได้เดือน {m}
+            </p>
+          </div>
+
+          <div className="h-52 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={targetVsActualData}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: '#475569', fontFamily: 'Prompt' }}
+                  axisLine={{ stroke: '#CBD5E1' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(v) => `฿${(Number(v) / 1000).toFixed(0)}k`}
+                  tick={{ fontSize: 11, fill: '#64748B', fontFamily: 'JetBrains Mono' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={52}
+                />
+                <Tooltip
+                  formatter={(value: any, name: any) => [
+                    `฿${fmt(Number(value) || 0)}`,
+                    String(name),
+                  ]}
+                  contentStyle={{
+                    borderRadius: '10px',
+                    border: '1px solid #E2E8F0',
+                    fontSize: '12px',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '12px', fontFamily: 'Prompt' }} />
+                <Bar
+                  dataKey="งบเป้าหมาย"
+                  fill="#CBD5E1"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="ใช้จริง"
+                  fill="#006A63"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="space-y-3.5 pt-2">
+            {categoryBreakdown.map((cat) => {
+              const barWidth =
+                cat.targetAmt > 0
+                  ? Math.min(100, (cat.actual / cat.targetAmt) * 100)
+                  : cat.actual > 0
+                  ? 100
+                  : 0;
+              const barColor = cat.isGood
+                ? 'bg-[#006A63]'
+                : cat.isSavings
+                ? 'bg-amber-500'
+                : 'bg-orange-600';
+
+              return (
+                <div key={cat.name}>
+                  <div className="flex justify-between text-xs font-heading mb-1 gap-2">
+                    <span className="font-semibold text-slate-700">{cat.name}</span>
+                    <span
+                      className={`font-num ${
+                        cat.isGood ? 'text-[#006A63]' : 'text-orange-700'
+                      }`}
+                    >
+                      ฿{fmt(cat.actual)} ({cat.actualPct.toFixed(1)}%) / เป้า ฿
+                      {fmt(cat.targetAmt)}
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${barColor} rounded-full transition-all duration-300`}
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="text-xs font-heading text-slate-500 border-b border-slate-200">
+                  <th className="py-2 pr-2">หมวดหมู่</th>
+                  <th className="py-2 px-2 text-right">งบเป้าหมาย</th>
+                  <th className="py-2 px-2 text-right">ใช้จริง</th>
+                  <th className="py-2 px-2 text-right">ส่วนต่าง</th>
+                  <th className="py-2 pl-2 text-right">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {categoryBreakdown.map((cat) => (
+                  <tr key={cat.name} className="hover:bg-slate-50/70">
+                    <td className="py-2.5 pr-2 font-medium text-slate-800">
+                      {cat.name}
+                    </td>
+                    <td className="py-2.5 px-2 text-right font-num text-slate-600">
+                      ฿{fmt(cat.targetAmt)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right font-num font-semibold text-slate-900">
+                      ฿{fmt(cat.actual)}
+                    </td>
+                    <td
+                      className={`py-2.5 px-2 text-right font-num ${
+                        cat.diff >= 0 ? 'text-[#0F766E]' : 'text-orange-700'
+                      }`}
+                    >
+                      {cat.diff >= 0 ? '+' : '-'}฿{fmt(Math.abs(cat.diff))}
+                    </td>
+                    <td className="py-2.5 pl-2 text-right whitespace-nowrap">
+                      {cat.isGood ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-[#0F766E]">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>ตามเกณฑ์</span>
+                        </span>
+                      ) : cat.isSavings ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-amber-700">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>ต่ำกว่าเป้า</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-orange-700">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>เกินงบ</span>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Right: Unpaid Bills + 4-Step Recovery Roadmap */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Unpaid Bills */}
+          <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-heading font-bold text-slate-900">
+                บิลที่รอชำระในเดือนนี้
+              </h2>
+              <span className="text-xs font-heading font-medium text-amber-700">
+                {unpaidExps.length} รายการ · ฿{fmt(unpaidTotal)}
+              </span>
+            </div>
+
+            {unpaidExps.length === 0 ? (
+              <div className="text-center py-6 text-sm text-[#0F766E] bg-[#CCFBF1]/40 rounded-lg font-heading">
+                ชำระครบทุกรายการในเดือนนี้แล้ว
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto pr-1">
+                {unpaidExps.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center justify-between py-2.5 px-2 hover:bg-slate-50 rounded-lg cursor-pointer transition gap-3"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        onChange={() => onTogglePaid(item.id)}
+                        className="w-4 h-4 accent-[#006A63] rounded cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-800 truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-xs text-slate-500 truncate">
+                          {item.note !== '-' ? `${item.note} · ` : ''}
+                          {item.category}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-num font-semibold text-sm text-slate-900 shrink-0">
+                      ฿{fmt(item.amount)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 4-Step Recovery Roadmap */}
+          <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200">
+            <h2 className="text-base font-heading font-bold text-slate-900 mb-3">
+              แผนฟื้นฟูสภาพคล่อง 4 ขั้นตอน
+            </h2>
+            <div className="divide-y divide-slate-100">
+              {RECOVERY_ROADMAP.map((step) => (
+                <div key={step.step} className="py-3 first:pt-1 last:pb-1">
+                  <div
+                    className={`text-sm font-heading font-semibold ${
+                      step.highlight ? 'text-[#006A63]' : 'text-slate-800'
+                    }`}
+                  >
+                    {step.step}. {step.title}
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {step.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};

@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>วางแผนการเงินและงบประมาณรายเดือน (สูตร 40-30-20-10)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            tealPrimary: '#006A63',
+            tealDark: '#004D48',
+            tealLight: '#E6F3F2',
+            bgCanvas: '#F4F7F6',
+            dangerSoft: '#FFF1EB',
+            dangerText: '#C2410C',
+            warnSoft: '#FEF9C3',
+            warnText: '#A16207',
+            okSoft: '#CCFBF1',
+            okText: '#0F766E'
+          },
+          fontFamily: {
+            heading: ['Prompt', 'sans-serif'],
+            body: ['Sarabun', 'sans-serif'],
+            num: ['Montserrat', 'Prompt', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Sarabun', sans-serif;
+      background-color: #F4F7F6;
+      color: #1E293B;
+    }
+    h1, h2, h3, .font-heading {
+      font-family: 'Prompt', sans-serif;
+    }
+    .font-num {
+      font-family: 'Montserrat', 'Prompt', sans-serif;
+      font-variant-numeric: tabular-nums;
+    }
+    .custom-checkbox {
+      width: 22px;
+      height: 22px;
+      accent-color: #006A63;
+      cursor: pointer;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Header -->
+  <header class="bg-tealPrimary text-white shadow-md sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🧭</span>
+            <h1 class="text-lg sm:text-xl font-bold tracking-tight">วางแผนการเงินและงบประมาณรายเดือน</h1>
+          </div>
+          <p class="text-xs sm:text-sm text-teal-100 mt-0.5">สูตรบริหารเงิน 40-30-20-10 • บันทึกรายรับ-รายจ่าย และติดตามแผนปลดหนี้</p>
+        </div>
+        <button onclick="resetToDefault()" title="คืนค่าข้อมูลเริ่มต้น" class="md:hidden text-xs bg-white/15 hover:bg-white/25 px-2.5 py-1.5 rounded-lg transition">
+          รีเซ็ต
+        </button>
+      </div>
+
+      <!-- Month Selector & Quick Actions -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center bg-white/15 rounded-xl px-3 py-1.5 backdrop-blur-sm">
+          <span class="text-xs text-teal-100 mr-2">📅 เดือน:</span>
+          <select id="monthSelect" onchange="changeMonth(this.value)" class="bg-transparent text-white font-heading font-semibold text-sm focus:outline-none cursor-pointer">
+          </select>
+        </div>
+
+        <button onclick="openAddMonthModal()" class="bg-white/15 hover:bg-white/25 text-white font-heading text-xs sm:text-sm font-medium px-3 py-2 rounded-xl transition flex items-center gap-1">
+          <span>+ เพิ่มเดือน</span>
+        </button>
+
+        <button onclick="openIncomeModal()" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-heading text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-1">
+          <span>+ รายรับ</span>
+        </button>
+
+        <button onclick="openExpenseModal()" class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-heading text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-1">
+          <span>+ รายจ่าย</span>
+        </button>
+
+        <button onclick="resetToDefault()" title="คืนค่าข้อมูลเริ่มต้นจาก Google Sheets" class="hidden md:inline-flex text-xs bg-white/10 hover:bg-white/20 text-teal-100 px-3 py-2 rounded-xl transition">
+          รีเซ็ตข้อมูล
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="bg-tealDark/60 border-t border-white/10">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto">
+        <button id="tab-dashboard" onclick="switchTab('dashboard')" class="tab-btn px-4 py-2.5 text-sm font-heading font-medium border-b-2 border-amber-300 text-white whitespace-nowrap transition">
+          🏠 แดชบอร์ดภาพรวม
+        </button>
+        <button id="tab-transactions" onclick="switchTab('transactions')" class="tab-btn px-4 py-2.5 text-sm font-heading font-medium border-b-2 border-transparent text-teal-100 hover:text-white whitespace-nowrap transition">
+          📝 รายการรับ-จ่าย & เช็กลิสต์
+        </button>
+        <button id="tab-projection" onclick="switchTab('projection')" class="tab-btn px-4 py-2.5 text-sm font-heading font-medium border-b-2 border-transparent text-teal-100 hover:text-white whitespace-nowrap transition">
+          📊 แนวโน้มรายเดือน & ปลดหนี้
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- ==================== TAB 1: DASHBOARD ==================== -->
+    <section id="view-dashboard" class="space-y-6">
+      <!-- KPI Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Total Income -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-heading text-slate-500">💵 รายรับรวม (<span class="active-month-label"></span>)</span>
+            <button onclick="openIncomeModal()" class="text-xs text-tealPrimary hover:underline font-heading font-medium">+ แก้ไข/เพิ่ม</button>
+          </div>
+          <div id="kpi-income" class="text-2xl sm:text-3xl font-num font-bold text-slate-800 mt-2">฿0.00</div>
+          <div id="kpi-income-sub" class="text-xs text-slate-500 mt-1.5">เงินเดือนหลัก ฿21,000.00 | เสริม ฿0.00</div>
+        </div>
+
+        <!-- Total Expense -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-heading text-slate-500">💳 รายจ่ายรวม (<span class="active-month-label"></span>)</span>
+            <span id="kpi-expense-pct" class="text-xs font-heading font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">0%</span>
+          </div>
+          <div id="kpi-expense" class="text-2xl sm:text-3xl font-num font-bold text-slate-800 mt-2">฿0.00</div>
+          <div id="kpi-expense-sub" class="text-xs text-slate-500 mt-1.5">เทียบกับรายรับทั้งหมดในเดือนนี้</div>
+        </div>
+
+        <!-- Net Cashflow -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-heading text-slate-500">📊 กระแสเงินสดสุทธิ</span>
+            <span id="kpi-net-badge" class="text-xs font-heading font-semibold px-2 py-0.5 rounded-full">สมดุล</span>
+          </div>
+          <div id="kpi-net" class="text-2xl sm:text-3xl font-num font-bold mt-2">฿0.00</div>
+          <div id="kpi-net-sub" class="text-xs text-slate-500 mt-1.5">รายรับหักรายจ่ายทั้งหมด</div>
+        </div>
+
+        <!-- Payment Checklist Status -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-heading text-slate-500">📋 สถานะชำระบิล</span>
+            <button onclick="switchTab('transactions')" class="text-xs text-tealPrimary hover:underline font-heading font-medium">ดูรายการ →</button>
+          </div>
+          <div id="kpi-paid-count" class="text-2xl sm:text-3xl font-num font-bold text-tealPrimary mt-2">0 / 0</div>
+          <div id="kpi-unpaid-amount" class="text-xs text-slate-500 mt-1.5">รอชำระอีก ฿0.00</div>
+        </div>
+      </div>
+
+      <!-- 40-30-20-10 Analysis + Cashflow Recovery Plan -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- 40-30-20-10 Breakdown -->
+        <div class="lg:col-span-7 bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-slate-800">🎯 สัดส่วนงบประมาณจริง vs สูตร 40-30-20-10</h2>
+              <p class="text-xs text-slate-500">เปรียบเทียบยอดใช้จ่ายจริงกับเพดานงบประมาณที่แนะนำจากรายได้เดือนนี้</p>
+            </div>
+          </div>
+
+          <div id="formula-bars" class="space-y-4"></div>
+
+          <div class="mt-5 pt-4 border-t border-slate-100 overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="text-xs font-heading text-slate-500 border-b border-slate-200">
+                  <th class="py-2 pr-2">หมวดหมู่</th>
+                  <th class="py-2 px-2 text-right">งบเป้าหมาย</th>
+                  <th class="py-2 px-2 text-right">ใช้จริง</th>
+                  <th class="py-2 px-2 text-right">ส่วนต่าง</th>
+                  <th class="py-2 pl-2 text-right">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="formula-table-body" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Cashflow Recovery Roadmap & Quick Unpaid Bills -->
+        <div class="lg:col-span-5 space-y-6">
+          <!-- Unpaid Bills Quick Box -->
+          <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-base font-bold text-slate-800">⏳ บิลที่รอชำระในเดือนนี้</h2>
+              <span id="unpaid-pill" class="text-xs font-heading font-semibold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">0 รายการ</span>
+            </div>
+            <div id="dashboard-unpaid-list" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
+          </div>
+
+          <!-- 4-Step Cashflow Recovery Action Plan -->
+          <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+            <h2 class="text-base font-bold text-slate-800 mb-3">🚀 แผนฟื้นฟูสภาพคล่อง 4 ขั้นตอน</h2>
+            <div class="space-y-2.5 text-sm">
+              <div class="p-3 rounded-xl bg-tealLight/60 border border-tealPrimary/15">
+                <div class="font-heading font-semibold text-tealPrimary">1. ปิดหนี้ก้อนเล็กทันที (Snowball Method)</div>
+                <div class="text-xs text-slate-600 mt-0.5">ปิดกู้ชอปปี้ (600), บัตรกสิกร1 (100), เซ็นทรัล2 (300) → เพิ่มสภาพคล่อง +1,000 บาท/เดือน</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+                <div class="font-heading font-semibold text-slate-800">2. สิ้นสุดงวดผ่อนบัตรเซ็นทรัล1 (ธ.ค. 69)</div>
+                <div class="text-xs text-slate-600 mt-0.5">ค่างวดผ่อนสินค้า 1,666.67 บาท หมดลงหลัง ธ.ค. 69 → คืนสภาพคล่อง +1,666.67 บาท/เดือน</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+                <div class="font-heading font-semibold text-slate-800">3. ค่างวดชอปปี้ (SPayLater) ลดลงจนหมดใน เม.ย. 70</div>
+                <div class="text-xs text-slate-600 mt-0.5">ยอดผ่อนทยอยลดจาก 5,000 จนเป็น 0 ใน เม.ย. 70 → กระแสเงินสดพลิกบวก +3,845 บาท</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+                <div class="font-heading font-semibold text-slate-800">4. รักษาวินัยค่าใช้จ่ายจำเป็น & ส่วนตัว</div>
+                <div class="text-xs text-slate-600 mt-0.5">คุมค่าใช้จ่ายจำเป็นให้คงที่ ~4,664 บาท และงดสร้างหนี้ใหม่ต่อเนื่อง</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: TRANSACTIONS & CHECKLIST ==================== -->
+    <section id="view-transactions" class="hidden space-y-6">
+      <!-- Income Section Card -->
+      <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-800">💵 รายรับประจำเดือน (<span class="active-month-label"></span>)</h2>
+            <p class="text-xs text-slate-500">ปรับแก้เงินเดือนหลัก รายได้เสริม หรือเพิ่มรายการรายรับพิเศษเฉพาะเดือนได้ทันที</p>
+          </div>
+          <button onclick="openIncomeModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-heading text-xs sm:text-sm font-medium px-3.5 py-2 rounded-xl transition self-start sm:self-auto">
+            + เพิ่มรายการรายรับ
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <label class="block text-xs font-heading text-slate-500 mb-1">💼 เงินเดือน / รายได้หลัก (บาท)</label>
+            <input id="input-salary" type="number" step="0.01" onchange="updateBaseIncome()" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-800 focus:outline-none focus:border-tealPrimary" />
+          </div>
+          <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <label class="block text-xs font-heading text-slate-500 mb-1">✨ รายได้เสริม / OT (บาท)</label>
+            <input id="input-side-income" type="number" step="0.01" onchange="updateBaseIncome()" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-800 focus:outline-none focus:border-tealPrimary" />
+          </div>
+          <div class="p-3.5 rounded-xl bg-tealLight/60 border border-tealPrimary/20 flex flex-col justify-center">
+            <span class="text-xs font-heading text-tealPrimary">💰 รวมรายรับทั้งหมดเดือนนี้</span>
+            <span id="tx-total-income" class="text-2xl font-num font-bold text-tealPrimary mt-0.5">฿0.00</span>
+          </div>
+        </div>
+
+        <!-- Extra Income Items List -->
+        <div id="extra-income-container" class="mt-4 hidden">
+          <div class="text-xs font-heading font-semibold text-slate-500 mb-2">รายการรายรับเพิ่มเติมในเดือนนี้:</div>
+          <div id="extra-income-list" class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden"></div>
+        </div>
+      </div>
+
+      <!-- Expense Checklist Card -->
+      <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-800">📝 เช็กลิสต์ค่าใช้จ่ายประจำเดือน (<span class="active-month-label"></span>)</h2>
+            <p class="text-xs text-slate-500">ติ๊กช่องชำระแล้วเพื่ออัปเดตยอดคงเหลืออัตโนมัติ หรือเพิ่มรายการใหม่ได้ทั้งแบบครั้งเดียวและรายเดือน</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="search-expense" type="text" oninput="renderAll()" placeholder="🔍 ค้นหารายการ..." class="border border-slate-300 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-tealPrimary" />
+            <select id="filter-category" onchange="renderAll()" class="border border-slate-300 rounded-xl px-3 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-tealPrimary">
+              <option value="ALL">ทุกหมวดหมู่</option>
+              <option value="ค่าใช้จ่ายจำเป็น (40%)">ค่าใช้จ่ายจำเป็น (40%)</option>
+              <option value="ภาระผ่อนหนี้ (30%)">ภาระผ่อนหนี้ (30%)</option>
+              <option value="เงินออม + ลงทุน (20%)">เงินออม + ลงทุน (20%)</option>
+              <option value="เงินใช้ส่วนตัว (10%)">เงินใช้ส่วนตัว (10%)</option>
+            </select>
+            <select id="filter-status" onchange="renderAll()" class="border border-slate-300 rounded-xl px-3 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-tealPrimary">
+              <option value="ALL">ทุกสถานะ</option>
+              <option value="UNPAID">⏳ รอชำระ</option>
+              <option value="PAID">✅ ชำระแล้ว</option>
+            </select>
+            <button onclick="openExpenseModal()" class="bg-tealPrimary hover:bg-tealDark text-white font-heading text-sm font-medium px-3.5 py-1.5 rounded-xl transition">
+              + เพิ่มรายจ่าย
+            </button>
+          </div>
+        </div>
+
+        <!-- Summary Strip -->
+        <div class="grid grid-cols-3 gap-3 mb-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-center sm:text-left">
+          <div>
+            <div class="text-xs text-slate-500 font-heading">ยอดรวมเดือนนี้</div>
+            <div id="strip-total" class="text-base sm:text-lg font-num font-bold text-slate-800">฿0.00</div>
+          </div>
+          <div>
+            <div class="text-xs text-emerald-700 font-heading">✅ ชำระแล้ว</div>
+            <div id="strip-paid" class="text-base sm:text-lg font-num font-bold text-emerald-700">฿0.00</div>
+          </div>
+          <div>
+            <div class="text-xs text-amber-700 font-heading">⏳ รอชำระ</div>
+            <div id="strip-unpaid" class="text-base sm:text-lg font-num font-bold text-amber-700">฿0.00</div>
+          </div>
+        </div>
+
+        <!-- Expense Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-tealPrimary text-white text-xs font-heading">
+                <th class="py-3 px-3 rounded-tl-xl w-14 text-center">จ่ายแล้ว</th>
+                <th class="py-3 px-3">รายการค่าใช้จ่าย</th>
+                <th class="py-3 px-3">หมวดหมู่ (40-30-20-10)</th>
+                <th class="py-3 px-3">ครบกำหนด / หมายเหตุ</th>
+                <th class="py-3 px-3 text-right">จำนวนเงิน (บาท)</th>
+                <th class="py-3 px-3 rounded-tr-xl text-center w-20">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="expense-table-body" class="divide-y divide-slate-100 text-sm"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: PROJECTION & DEBT STRATEGY ==================== -->
+    <section id="view-projection" class="hidden space-y-6">
+      <!-- Multi-month Projection Table -->
+      <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-800">📈 ตารางสรุปแนวโน้มรายรับ-รายจ่ายล่วงหน้าทุกเดือน</h2>
+            <p class="text-xs text-slate-500">อัปเดตอัตโนมัติตามรายการจริงและเดือนที่คุณเพิ่มเข้ามา</p>
+          </div>
+          <button onclick="openAddMonthModal()" class="bg-tealPrimary hover:bg-tealDark text-white font-heading text-xs sm:text-sm font-medium px-3.5 py-2 rounded-xl transition self-start sm:self-auto">
+            + เพิ่มเดือนใหม่
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead id="projection-thead"></thead>
+            <tbody id="projection-tbody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Debt Payoff Priority Table -->
+      <div class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-sm">
+        <h2 class="text-base sm:text-lg font-bold text-slate-800 mb-1">🎯 ลำดับความสำคัญในการปลดหนี้ (Debt Snowball & Avalanche)</h2>
+        <p class="text-xs text-slate-500 mb-4">เรียงลำดับหนี้ที่ควรปิดก่อนเพื่อลดดอกเบี้ยและปลดล็อกกระแสเงินสดรายเดือน</p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-800 text-white text-xs font-heading">
+                <th class="py-2.5 px-3 rounded-tl-xl text-center">อันดับ</th>
+                <th class="py-2.5 px-3">รายการหนี้สิน</th>
+                <th class="py-2.5 px-3 text-right">ค่างวด/เดือน</th>
+                <th class="py-2.5 px-3">ประเภท / ลักษณะ</th>
+                <th class="py-2.5 px-3">ระดับความเร่งด่วน</th>
+                <th class="py-2.5 px-3 rounded-tr-xl">กลยุทธ์แนะนำ</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">1</td>
+                <td class="py-2.5 px-3 font-medium">กู้ชอปปี้600</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿600.00</td>
+                <td class="py-2.5 px-3 text-slate-600">ดอกเบี้ยสูงรายวัน</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-dangerSoft text-dangerText">🚨 เร่งด่วนอันดับ 1</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ปิดยอดเต็มจำนวนทันทีเพื่อตัดวงจรดอกเบี้ยสะสม</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">2</td>
+                <td class="py-2.5 px-3 font-medium">บัตรกสิกร1</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿100.00</td>
+                <td class="py-2.5 px-3 text-slate-600">บัตรเครดิต</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-dangerSoft text-dangerText">🚨 เร่งด่วนอันดับ 2</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ยอดคงค้างน้อย ปิดจบได้ทันที ลดจำนวนบัญชีหนี้</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">3</td>
+                <td class="py-2.5 px-3 font-medium">บัตรเซ็นทรัล2</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿300.00</td>
+                <td class="py-2.5 px-3 text-slate-600">บัตรเครดิต</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-warnSoft text-warnText">⚡ เร่งด่วนอันดับ 3</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ปิดยอดในรอบบิลถัดไป สร้างความสำเร็จตามวิธี Snowball</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">4</td>
+                <td class="py-2.5 px-3 font-medium">บัตรบรูการ์ด</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿600.00</td>
+                <td class="py-2.5 px-3 text-slate-600">สินเชื่อ/บัตรกดเงินสด</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-warnSoft text-warnText">⚡ ปานกลาง</span></td>
+                <td class="py-2.5 px-3 text-slate-600">เร่งปิดยอดเพื่อลดค่าธรรมเนียมและดอกเบี้ย</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">5</td>
+                <td class="py-2.5 px-3 font-medium">บัตรเซ็นทรัล1</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿1,666.67</td>
+                <td class="py-2.5 px-3 text-slate-600">บัตรเครดิตผ่อนสินค้า</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-slate-100 text-slate-700">📌 เฝ้าระวังปกติ</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ผ่อนชำระตรงเวลา หมดงวดใน ธ.ค. 69 คืนสภาพคล่อง 1,666.67 บาท</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">6</td>
+                <td class="py-2.5 px-3 font-medium">บัตรKTC</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿2,400.00</td>
+                <td class="py-2.5 px-3 text-slate-600">บัตรเครดิต</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-slate-100 text-slate-700">📌 เฝ้าระวังปกติ</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ชำระตรงเวลาเพื่อรักษาประวัติเครดิตบูโรที่ดี</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">7</td>
+                <td class="py-2.5 px-3 font-medium">บัตรกสิกร2</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿3,100.00</td>
+                <td class="py-2.5 px-3 text-slate-600">บัตรเครดิต</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-dangerSoft text-dangerText">⚠️ สำคัญสูง</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ยอดคงค้าง 3,100 บาท งดรูดเพิ่มเด็ดขาด และเร่งตัดเงินต้น</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">8</td>
+                <td class="py-2.5 px-3 font-medium">ชอปปี้ (SPayLater)</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿5,000.00</td>
+                <td class="py-2.5 px-3 text-slate-600">สินเชื่อผ่อนชำระ</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-okSoft text-okText">📉 ทยอยลดลง</span></td>
+                <td class="py-2.5 px-3 text-slate-600">ยอดผ่อนลดลงทุกเดือนจนหมดใน เม.ย. 70</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="py-2.5 px-3 text-center font-num font-bold">9</td>
+                <td class="py-2.5 px-3 font-medium">ผ่อนรถ</td>
+                <td class="py-2.5 px-3 text-right font-num font-semibold">฿5,196.00</td>
+                <td class="py-2.5 px-3 text-slate-600">สินเชื่อเช่าซื้อ</td>
+                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-xs font-heading bg-slate-100 text-slate-700">📌 ภาระคงที่</span></td>
+                <td class="py-2.5 px-3 text-slate-600">จ่ายตรงกำหนดทุกวันที่ 10-25</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== MODAL: ADD EXPENSE ==================== -->
+  <div id="modal-expense" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-slate-800">➕ เพิ่มรายการรายจ่าย</h3>
+        <button onclick="closeModal('modal-expense')" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <form onsubmit="submitExpense(event)" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">ชื่อรายการค่าใช้จ่าย *</label>
+          <input id="exp-name" type="text" required placeholder="เช่น ค่าอาหารกลางวัน, ค่าน้ำมัน, ค่าเน็ต" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-tealPrimary" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-heading font-medium text-slate-600 mb-1">จำนวนเงิน (บาท) *</label>
+            <input id="exp-amount" type="number" step="0.01" min="0" required placeholder="0.00" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-num focus:outline-none focus:border-tealPrimary" />
+          </div>
+          <div>
+            <label class="block text-xs font-heading font-medium text-slate-600 mb-1">วันครบกำหนด / หมายเหตุ</label>
+            <input id="exp-note" type="text" placeholder="เช่น วันที่ 25" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-tealPrimary" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">หมวดหมู่ตามสูตร 40-30-20-10</label>
+          <select id="exp-category" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-tealPrimary">
+            <option value="ค่าใช้จ่ายจำเป็น (40%)">ค่าใช้จ่ายจำเป็น (40%)</option>
+            <option value="ภาระผ่อนหนี้ (30%)">ภาระผ่อนหนี้ (30%)</option>
+            <option value="เงินออม + ลงทุน (20%)">เงินออม + ลงทุน (20%)</option>
+            <option value="เงินใช้ส่วนตัว (10%)">เงินใช้ส่วนตัว (10%)</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between pt-1">
+          <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input id="exp-recurring" type="checkbox" class="rounded text-tealPrimary" />
+            <span>ทำซ้ำทุกเดือน (ตั้งแต่เดือนนี้เป็นต้นไป)</span>
+          </label>
+        </div>
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input id="exp-paid" type="checkbox" class="rounded text-tealPrimary" />
+            <span>ติ๊กว่าชำระเงินแล้วทันที</span>
+          </label>
+        </div>
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeModal('modal-expense')" class="px-4 py-2 rounded-xl text-sm font-heading text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-sm font-heading font-semibold bg-tealPrimary hover:bg-tealDark text-white">บันทึกรายจ่าย</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: ADD INCOME ==================== -->
+  <div id="modal-income" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-slate-800">💵 เพิ่มรายการรายรับ</h3>
+        <button onclick="closeModal('modal-income')" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <form onsubmit="submitIncome(event)" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">ชื่อรายการรายรับ *</label>
+          <input id="inc-name" type="text" required placeholder="เช่น โบนัส, ขายของออนไลน์, ค่าล่วงเวลา" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-tealPrimary" />
+        </div>
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">จำนวนเงิน (บาท) *</label>
+          <input id="inc-amount" type="number" step="0.01" min="0" required placeholder="0.00" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-num focus:outline-none focus:border-tealPrimary" />
+        </div>
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">รูปแบบการบันทึก</label>
+          <select id="inc-type" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-tealPrimary">
+            <option value="extra">เพิ่มเป็นรายการรายรับพิเศษในเดือนนี้</option>
+            <option value="side">บวกเพิ่มเข้าช่อง "รายได้เสริม" ของเดือนนี้</option>
+            <option value="salary">อัปเดตยอด "เงินเดือนหลัก" ของเดือนนี้</option>
+          </select>
+        </div>
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeModal('modal-income')" class="px-4 py-2 rounded-xl text-sm font-heading text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-sm font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white">บันทึกรายรับ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: ADD MONTH ==================== -->
+  <div id="modal-month" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-slate-800">📅 เพิ่มเดือนใหม่</h3>
+        <button onclick="closeModal('modal-month')" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <form onsubmit="submitAddMonth(event)" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-heading font-medium text-slate-600 mb-1">ชื่อเดือน (เช่น พ.ค. 70) *</label>
+          <input id="new-month-name" type="text" required placeholder="พ.ค. 70" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-heading focus:outline-none focus:border-tealPrimary" />
+        </div>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <label class="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
+            <input id="copy-prev-month" type="checkbox" checked class="mt-0.5 rounded text-tealPrimary" />
+            <span>
+              <strong class="font-heading block text-slate-800">คัดลอกยอดเงินเดือนและบิลประจำจากเดือนล่าสุด</strong>
+              <span class="text-xs text-slate-500">ระบบจะยกยอดเงินเดือนและรายการค่าใช้จ่ายประจำมาให้โดยอัตโนมัติ (สถานะชำระจะเริ่มเป็นยังไม่จ่าย)</span>
+            </span>
+          </label>
+        </div>
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeModal('modal-month')" class="px-4 py-2 rounded-xl text-sm font-heading text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-sm font-heading font-semibold bg-tealPrimary hover:bg-tealDark text-white">สร้างเดือนใหม่</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'thai_budget_40_30_20_10_v3';
+
+    const DEFAULT_STATE = {
+      months: ['พ.ย. 69', 'ธ.ค. 69', 'ม.ค. 70', 'ก.พ. 70', 'มี.ค. 70', 'เม.ย. 70'],
+      activeMonth: 'พ.ย. 69',
+      activeTab: 'dashboard',
+      incomes: {
+        'พ.ย. 69': { salary: 21000, side: 0, extras: [] },
+        'ธ.ค. 69': { salary: 21000, side: 0, extras: [] },
+        'ม.ค. 70': { salary: 21000, side: 0, extras: [] },
+        'ก.พ. 70': { salary: 21000, side: 0, extras: [] },
+        'มี.ค. 70': { salary: 21000, side: 0, extras: [] },
+        'เม.ย. 70': { salary: 21000, side: 0, extras: [] }
+      },
+      expenses: [
+        { id: 1, name: 'กู้ชอปปี้600', note: 'วันที่ 29', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 600, 'ธ.ค. 69': 600, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': false } },
+        { id: 2, name: 'เน็ตบ้าน', note: '-', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 631.30, 'ธ.ค. 69': 631.30, 'ม.ค. 70': 631.30, 'ก.พ. 70': 631.30, 'มี.ค. 70': 631.30, 'เม.ย. 70': 631.30 }, paid: { 'พ.ย. 69': false } },
+        { id: 3, name: 'เน็ตมือถือ', note: '-', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 533.93, 'ธ.ค. 69': 533.93, 'ม.ค. 70': 533.93, 'ก.พ. 70': 533.93, 'มี.ค. 70': 533.93, 'เม.ย. 70': 533.93 }, paid: { 'พ.ย. 69': false } },
+        { id: 4, name: 'เน็ตฟิต', note: 'วันที่ 17', category: 'เงินใช้ส่วนตัว (10%)', amounts: { 'พ.ย. 69': 105, 'ธ.ค. 69': 105, 'ม.ค. 70': 105, 'ก.พ. 70': 105, 'มี.ค. 70': 105, 'เม.ย. 70': 105 }, paid: { 'พ.ย. 69': false } },
+        { id: 5, name: 'บัตรเซ็นทรัล1', note: 'วันที่ 15-4', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 1666.67, 'ธ.ค. 69': 1666.67, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': false } },
+        { id: 6, name: 'ชอปปี้', note: 'วันที่ 29', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 5000, 'ธ.ค. 69': 4078.38, 'ม.ค. 70': 3442.42, 'ก.พ. 70': 2959.88, 'มี.ค. 70': 1067.75, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': false } },
+        { id: 7, name: 'บัตรเซ็นทรัล2', note: 'วันที่ 18-8', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 300, 'ธ.ค. 69': 300, 'ม.ค. 70': 300, 'ก.พ. 70': 300, 'มี.ค. 70': 300, 'เม.ย. 70': 300 }, paid: { 'พ.ย. 69': false } },
+        { id: 8, name: 'ค่าน้ำบ้านนนทบุรี', note: '-', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 36, 'ธ.ค. 69': 91, 'ม.ค. 70': 91, 'ก.พ. 70': 91, 'มี.ค. 70': 91, 'เม.ย. 70': 91 }, paid: { 'พ.ย. 69': false } },
+        { id: 9, name: 'ค่าน้ำบ้านตลิ่งชัน', note: 'วันที่ 16-25', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 588, 'ธ.ค. 69': 588, 'ม.ค. 70': 588, 'ก.พ. 70': 588, 'มี.ค. 70': 588, 'เม.ย. 70': 588 }, paid: { 'พ.ย. 69': true } },
+        { id: 10, name: 'ผ่อนรถ', note: 'วันที่ 10-25', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 5196, 'ธ.ค. 69': 5196, 'ม.ค. 70': 5196, 'ก.พ. 70': 5196, 'มี.ค. 70': 5196, 'เม.ย. 70': 5196 }, paid: { 'พ.ย. 69': true } },
+        { id: 11, name: 'Google ไดฟ์', note: '-', category: 'เงินใช้ส่วนตัว (10%)', amounts: { 'พ.ย. 69': 189, 'ธ.ค. 69': 189, 'ม.ค. 70': 189, 'ก.พ. 70': 189, 'มี.ค. 70': 189, 'เม.ย. 70': 189 }, paid: { 'พ.ย. 69': true } },
+        { id: 12, name: 'ค่าไฟนนทบุรี', note: 'วันที่ 23', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 361.33, 'ธ.ค. 69': 361.33, 'ม.ค. 70': 361.33, 'ก.พ. 70': 361.33, 'มี.ค. 70': 361.33, 'เม.ย. 70': 361.33 }, paid: { 'พ.ย. 69': true } },
+        { id: 13, name: 'ค่าไฟตลิ่งชัน', note: 'จ่าย 14', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 2459, 'ธ.ค. 69': 2459, 'ม.ค. 70': 2459, 'ก.พ. 70': 2459, 'มี.ค. 70': 2459, 'เม.ย. 70': 2459 }, paid: { 'พ.ย. 69': true } },
+        { id: 14, name: 'บัตรกสิกร1', note: 'วันที่ 10-25', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 100, 'ธ.ค. 69': 100, 'ม.ค. 70': 100, 'ก.พ. 70': 100, 'มี.ค. 70': 100, 'เม.ย. 70': 100 }, paid: { 'พ.ย. 69': true } },
+        { id: 15, name: 'บัตรKTC', note: 'วันที่ 4-16', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 2400, 'ธ.ค. 69': 2400, 'ม.ค. 70': 2400, 'ก.พ. 70': 2400, 'มี.ค. 70': 2400, 'เม.ย. 70': 2400 }, paid: { 'พ.ย. 69': true } },
+        { id: 16, name: 'บัตรบรูการ์ด', note: 'วันที่ 10-25', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 600, 'ธ.ค. 69': 600, 'ม.ค. 70': 600, 'ก.พ. 70': 600, 'มี.ค. 70': 600, 'เม.ย. 70': 600 }, paid: { 'พ.ย. 69': true } },
+        { id: 17, name: 'บัตรกสิกร2', note: 'วันที่ 10-25', category: 'ภาระผ่อนหนี้ (30%)', amounts: { 'พ.ย. 69': 3100, 'ธ.ค. 69': 3100, 'ม.ค. 70': 3100, 'ก.พ. 70': 3100, 'มี.ค. 70': 3100, 'เม.ย. 70': 3100 }, paid: { 'พ.ย. 69': true } },
+        { id: 18, name: 'ออม', note: 'วันที่ 5', category: 'เงินออม + ลงทุน (20%)', amounts: { 'พ.ย. 69': 500, 'ธ.ค. 69': 500, 'ม.ค. 70': 500, 'ก.พ. 70': 500, 'มี.ค. 70': 500, 'เม.ย. 70': 500 }, paid: { 'พ.ย. 69': true } },
+        { id: 19, name: 'ค่าซ่อมแซมก๊อกน้ำและท่อประปา', note: '19/11/2026 (ซ่อมท่อน้ำรั่ว)', category: 'ค่าใช้จ่ายจำเป็น (40%)', amounts: { 'พ.ย. 69': 350, 'ธ.ค. 69': 0, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': true } },
+        { id: 20, name: 'ค่าของขวัญวันเกิดเพื่อนร่วมงาน', note: '2/12/2026 (ของขวัญ+แชร์เค้ก)', category: 'เงินใช้ส่วนตัว (10%)', amounts: { 'พ.ย. 69': 200, 'ธ.ค. 69': 0, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': false } },
+        { id: 21, name: 'ค่าน้ำมัน', note: 'ธ.ค. 69 (ค่าน้ำมันเดินทาง)', category: 'เงินใช้ส่วนตัว (10%)', amounts: { 'พ.ย. 69': 0, 'ธ.ค. 69': 1500, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 }, paid: { 'พ.ย. 69': false } }
+      ]
+    };
+
+    let state = loadState();
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.months) && Array.isArray(parsed.expenses)) {
+            return parsed;
+          }
+        }
+      } catch (e) {}
+      return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {}
+    }
+
+    function resetToDefault() {
+      if (confirm('ต้องการคืนค่าข้อมูลเริ่มต้นทั้งหมดกลับไปเป็นค่าตั้งต้นใช่หรือไม่?')) {
+        state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+        saveState();
+        renderAll();
+      }
+    }
+
+    function fmt(num) {
+      const val = Number(num) || 0;
+      return val.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function getMonthIncome(month) {
+      const inc = state.incomes[month] || { salary: 0, side: 0, extras: [] };
+      const extrasTotal = (inc.extras || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      return {
+        salary: Number(inc.salary) || 0,
+        side: Number(inc.side) || 0,
+        extras: inc.extras || [],
+        extrasTotal,
+        total: (Number(inc.salary) || 0) + (Number(inc.side) || 0) + extrasTotal
+      };
+    }
+
+    function getMonthExpenses(month) {
+      return state.expenses
+        .map(exp => ({
+          ...exp,
+          amount: Number(exp.amounts[month]) || 0,
+          isPaid: !!(exp.paid && exp.paid[month])
+        }))
+        .filter(exp => exp.amount > 0);
+    }
+
+    function changeMonth(month) {
+      state.activeMonth = month;
+      saveState();
+      renderAll();
+    }
+
+    function switchTab(tab) {
+      state.activeTab = tab;
+      saveState();
+      ['dashboard', 'transactions', 'projection'].forEach(t => {
+        const view = document.getElementById('view-' + t);
+        const btn = document.getElementById('tab-' + t);
+        if (t === tab) {
+          view.classList.remove('hidden');
+          btn.classList.add('border-amber-300', 'text-white');
+          btn.classList.remove('border-transparent', 'text-teal-100');
+        } else {
+          view.classList.add('hidden');
+          btn.classList.remove('border-amber-300', 'text-white');
+          btn.classList.add('border-transparent', 'text-teal-100');
+        }
+      });
+    }
+
+    function togglePaid(expenseId) {
+      const m = state.activeMonth;
+      const exp = state.expenses.find(e => e.id === expenseId);
+      if (!exp) return;
+      if (!exp.paid) exp.paid = {};
+      exp.paid[m] = !exp.paid[m];
+      saveState();
+      renderAll();
+    }
+
+    function deleteExpense(expenseId) {
+      const m = state.activeMonth;
+      const exp = state.expenses.find(e => e.id === expenseId);
+      if (!exp) return;
+      if (confirm(`ลบรายการ "${exp.name}" ออกจากเดือน ${m} ใช่หรือไม่?`)) {
+        exp.amounts[m] = 0;
+        const stillUsed = state.months.some(mon => (Number(exp.amounts[mon]) || 0) > 0);
+        if (!stillUsed) {
+          state.expenses = state.expenses.filter(e => e.id !== expenseId);
+        }
+        saveState();
+        renderAll();
+      }
+    }
+
+    function updateBaseIncome() {
+      const m = state.activeMonth;
+      if (!state.incomes[m]) state.incomes[m] = { salary: 0, side: 0, extras: [] };
+      state.incomes[m].salary = Number(document.getElementById('input-salary').value) || 0;
+      state.incomes[m].side = Number(document.getElementById('input-side-income').value) || 0;
+      saveState();
+      renderAll();
+    }
+
+    function deleteExtraIncome(idx) {
+      const m = state.activeMonth;
+      if (state.incomes[m] && state.incomes[m].extras) {
+        state.incomes[m].extras.splice(idx, 1);
+        saveState();
+        renderAll();
+      }
+    }
+
+    function openExpenseModal() {
+      document.getElementById('exp-name').value = '';
+      document.getElementById('exp-amount').value = '';
+      document.getElementById('exp-note').value = '';
+      document.getElementById('exp-recurring').checked = false;
+      document.getElementById('exp-paid').checked = false;
+      const modal = document.getElementById('modal-expense');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function submitExpense(e) {
+      e.preventDefault();
+      const name = document.getElementById('exp-name').value.trim();
+      const amount = Number(document.getElementById('exp-amount').value) || 0;
+      const note = document.getElementById('exp-note').value.trim() || '-';
+      const category = document.getElementById('exp-category').value;
+      const recurring = document.getElementById('exp-recurring').checked;
+      const isPaid = document.getElementById('exp-paid').checked;
+
+      if (!name || amount <= 0) return;
+
+      const amounts = {};
+      const startIdx = state.months.indexOf(state.activeMonth);
+      state.months.forEach((mon, idx) => {
+        if (recurring && idx >= startIdx) {
+          amounts[mon] = amount;
+        } else if (mon === state.activeMonth) {
+          amounts[mon] = amount;
+        } else {
+          amounts[mon] = 0;
+        }
+      });
+
+      const nextId = state.expenses.reduce((max, item) => Math.max(max, item.id), 0) + 1;
+      state.expenses.push({
+        id: nextId,
+        name,
+        note,
+        category,
+        amounts,
+        paid: { [state.activeMonth]: isPaid }
+      });
+
+      saveState();
+      closeModal('modal-expense');
+      renderAll();
+    }
+
+    function openIncomeModal() {
+      document.getElementById('inc-name').value = '';
+      document.getElementById('inc-amount').value = '';
+      document.getElementById('inc-type').value = 'extra';
+      const modal = document.getElementById('modal-income');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function submitIncome(e) {
+      e.preventDefault();
+      const m = state.activeMonth;
+      const name = document.getElementById('inc-name').value.trim();
+      const amount = Number(document.getElementById('inc-amount').value) || 0;
+      const type = document.getElementById('inc-type').value;
+
+      if (!name || amount <= 0) return;
+      if (!state.incomes[m]) state.incomes[m] = { salary: 0, side: 0, extras: [] };
+
+      if (type === 'salary') {
+        state.incomes[m].salary = amount;
+      } else if (type === 'side') {
+        state.incomes[m].side = (Number(state.incomes[m].side) || 0) + amount;
+      } else {
+        if (!state.incomes[m].extras) state.incomes[m].extras = [];
+        state.incomes[m].extras.push({ name, amount });
+      }
+
+      saveState();
+      closeModal('modal-income');
+      renderAll();
+    }
+
+    function suggestNextThaiMonth() {
+      const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+      const last = state.months[state.months.length - 1] || 'เม.ย. 70';
+      const parts = last.trim().split(/\s+/);
+      if (parts.length === 2) {
+        const idx = thaiMonths.indexOf(parts[0]);
+        const yr = parseInt(parts[1], 10);
+        if (idx !== -1 && !isNaN(yr)) {
+          if (idx === 11) return `${thaiMonths[0]} ${yr + 1}`;
+          return `${thaiMonths[idx + 1]} ${yr}`;
+        }
+      }
+      return '';
+    }
+
+    function openAddMonthModal() {
+      document.getElementById('new-month-name').value = suggestNextThaiMonth();
+      document.getElementById('copy-prev-month').checked = true;
+      const modal = document.getElementById('modal-month');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function submitAddMonth(e) {
+      e.preventDefault();
+      const newMonth = document.getElementById('new-month-name').value.trim();
+      const copyPrev = document.getElementById('copy-prev-month').checked;
+      if (!newMonth) return;
+
+      if (state.months.includes(newMonth)) {
+        alert(`มีเดือน "${newMonth}" อยู่ในระบบแล้ว`);
+        return;
+      }
+
+      const prevMonth = state.months[state.months.length - 1];
+      state.months.push(newMonth);
+
+      const prevInc = state.incomes[prevMonth] || { salary: 21000, side: 0, extras: [] };
+      state.incomes[newMonth] = {
+        salary: copyPrev ? (Number(prevInc.salary) || 0) : 0,
+        side: 0,
+        extras: []
+      };
+
+      state.expenses.forEach(exp => {
+        const prevAmt = copyPrev ? (Number(exp.amounts[prevMonth]) || 0) : 0;
+        exp.amounts[newMonth] = prevAmt;
+        if (!exp.paid) exp.paid = {};
+        exp.paid[newMonth] = false;
+      });
+
+      state.activeMonth = newMonth;
+      saveState();
+      closeModal('modal-month');
+      renderAll();
+    }
+
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function renderAll() {
+      const m = state.activeMonth;
+
+      // Populate Month Select
+      const select = document.getElementById('monthSelect');
+      select.innerHTML = state.months.map(mon =>
+        `<option value="${mon}" ${mon === m ? 'selected' : ''} class="text-slate-900">${mon}</option>`
+      ).join('');
+
+      document.querySelectorAll('.active-month-label').forEach(el => el.textContent = m);
+
+      const incData = getMonthIncome(m);
+      const exps = getMonthExpenses(m);
+
+      const totalExpense = exps.reduce((s, e) => s + e.amount, 0);
+      const paidExps = exps.filter(e => e.isPaid);
+      const unpaidExps = exps.filter(e => !e.isPaid);
+      const paidTotal = paidExps.reduce((s, e) => s + e.amount, 0);
+      const unpaidTotal = unpaidExps.reduce((s, e) => s + e.amount, 0);
+      const net = incData.total - totalExpense;
+      const expPct = incData.total > 0 ? (totalExpense / incData.total) * 100 : 0;
+
+      // Dashboard KPI Cards
+      document.getElementById('kpi-income').textContent = '฿' + fmt(incData.total);
+      document.getElementById('kpi-income-sub').textContent =
+        `เงินเดือนหลัก ฿${fmt(incData.salary)} | เสริม/อื่นๆ ฿${fmt(incData.side + incData.extrasTotal)}`;
+
+      document.getElementById('kpi-expense').textContent = '฿' + fmt(totalExpense);
+      const pctBadge = document.getElementById('kpi-expense-pct');
+      pctBadge.textContent = expPct.toFixed(1) + '% ของรายรับ';
+      pctBadge.className = 'text-xs font-heading font-semibold px-2 py-0.5 rounded-full ' +
+        (expPct > 100 ? 'bg-dangerSoft text-dangerText' : 'bg-okSoft text-okText');
+
+      const netEl = document.getElementById('kpi-net');
+      const netBadge = document.getElementById('kpi-net-badge');
+      netEl.textContent = (net < 0 ? '-฿' : '฿') + fmt(Math.abs(net));
+      if (net < 0) {
+        netEl.className = 'text-2xl sm:text-3xl font-num font-bold mt-2 text-dangerText';
+        netBadge.textContent = '⚠️ ติดลบ (เกินงบ)';
+        netBadge.className = 'text-xs font-heading font-semibold px-2 py-0.5 rounded-full bg-dangerSoft text-dangerText';
+      } else {
+        netEl.className = 'text-2xl sm:text-3xl font-num font-bold mt-2 text-okText';
+        netBadge.textContent = '✅ เป็นบวก';
+        netBadge.className = 'text-xs font-heading font-semibold px-2 py-0.5 rounded-full bg-okSoft text-okText';
+      }
+
+      document.getElementById('kpi-paid-count').textContent = `${paidExps.length} / ${exps.length} รายการ`;
+      document.getElementById('kpi-unpaid-amount').textContent = `รอชำระอีก ฿${fmt(unpaidTotal)}`;
+
+      // 40-30-20-10 Breakdown
+      const categories = [
+        { name: 'ค่าใช้จ่ายจำเป็น (40%)', targetPct: 0.40, isSavings: false },
+        { name: 'ภาระผ่อนหนี้ (30%)', targetPct: 0.30, isSavings: false },
+        { name: 'เงินออม + ลงทุน (20%)', targetPct: 0.20, isSavings: true },
+        { name: 'เงินใช้ส่วนตัว (10%)', targetPct: 0.10, isSavings: false }
+      ];
+
+      const barsHtml = [];
+      const tableRowsHtml = [];
+
+      categories.forEach(cat => {
+        const actual = exps.filter(e => e.category === cat.name).reduce((s, e) => s + e.amount, 0);
+        const targetAmt = incData.total * cat.targetPct;
+        const actualPct = incData.total > 0 ? (actual / incData.total) * 100 : 0;
+        const diff = cat.isSavings ? (actual - targetAmt) : (targetAmt - actual);
+        const isGood = cat.isSavings ? (actual >= targetAmt) : (actual <= targetAmt);
+
+        const barWidth = Math.min(100, (actualPct / (cat.targetPct * 100)) * 100);
+        const barColor = isGood ? 'bg-tealPrimary' : (cat.isSavings ? 'bg-amber-400' : 'bg-orange-600');
+
+        barsHtml.push(`
+          <div>
+            <div class="flex justify-between text-xs font-heading mb-1">
+              <span class="font-semibold text-slate-700">${cat.name}</span>
+              <span class="font-num ${isGood ? 'text-tealPrimary' : 'text-dangerText'}">
+                ฿${fmt(actual)} (${actualPct.toFixed(1)}%) / เป้า ฿${fmt(targetAmt)}
+              </span>
+            </div>
+            <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+              <div class="h-full ${barColor} rounded-full transition-all duration-300" style="width: ${barWidth}%"></div>
+            </div>
+          </div>
+        `);
+
+        const badge = isGood
+          ? `<span class="px-2 py-0.5 rounded-full text-xs font-heading bg-okSoft text-okText">✅ ตามเกณฑ์</span>`
+          : (cat.isSavings
+              ? `<span class="px-2 py-0.5 rounded-full text-xs font-heading bg-warnSoft text-warnText">⚠️ ต่ำกว่าเป้า</span>`
+              : `<span class="px-2 py-0.5 rounded-full text-xs font-heading bg-dangerSoft text-dangerText">🚨 เกินงบ</span>`);
+
+        tableRowsHtml.push(`
+          <tr>
+            <td class="py-2.5 pr-2 font-medium text-slate-800">${cat.name}</td>
+            <td class="py-2.5 px-2 text-right font-num text-slate-600">฿${fmt(targetAmt)}</td>
+            <td class="py-2.5 px-2 text-right font-num font-semibold text-slate-800">฿${fmt(actual)}</td>
+            <td class="py-2.5 px-2 text-right font-num ${diff >= 0 ? 'text-okText' : 'text-dangerText'}">${diff >= 0 ? '+' : '-'}฿${fmt(Math.abs(diff))}</td>
+            <td class="py-2.5 pl-2 text-right">${badge}</td>
+          </tr>
+        `);
+      });
+
+      document.getElementById('formula-bars').innerHTML = barsHtml.join('');
+      document.getElementById('formula-table-body').innerHTML = tableRowsHtml.join('');
+
+      // Dashboard Unpaid Bills Quick Box
+      document.getElementById('unpaid-pill').textContent = `${unpaidExps.length} รายการ`;
+      const unpaidListEl = document.getElementById('dashboard-unpaid-list');
+      if (unpaidExps.length === 0) {
+        unpaidListEl.innerHTML = `<div class="text-center py-6 text-sm text-okText bg-okSoft/40 rounded-xl font-heading">🎉 ชำระครบทุกรายการในเดือนนี้แล้ว!</div>`;
+      } else {
+        unpaidListEl.innerHTML = unpaidExps.map(item => `
+          <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-tealLight/40 border border-slate-200/70 transition">
+            <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
+              <input type="checkbox" onchange="togglePaid(${item.id})" class="custom-checkbox shrink-0" />
+              <div class="truncate">
+                <div class="text-sm font-medium text-slate-800 truncate">${item.name}</div>
+                <div class="text-xs text-slate-500">${item.note !== '-' ? item.note : item.category}</div>
+              </div>
+            </label>
+            <span class="font-num font-semibold text-sm text-slate-800 ml-2">฿${fmt(item.amount)}</span>
+          </div>
+        `).join('');
+      }
+
+      // Tab 2: Income Inputs & Extra Incomes
+      document.getElementById('input-salary').value = incData.salary;
+      document.getElementById('input-side-income').value = incData.side;
+      document.getElementById('tx-total-income').textContent = '฿' + fmt(incData.total);
+
+      const extraContainer = document.getElementById('extra-income-container');
+      const extraList = document.getElementById('extra-income-list');
+      if (incData.extras.length > 0) {
+        extraContainer.classList.remove('hidden');
+        extraList.innerHTML = incData.extras.map((ex, i) => `
+          <div class="flex items-center justify-between px-3.5 py-2 bg-white text-sm">
+            <span class="text-slate-700 font-medium">✨ ${ex.name}</span>
+            <div class="flex items-center gap-3">
+              <span class="font-num font-semibold text-emerald-700">+฿${fmt(ex.amount)}</span>
+              <button onclick="deleteExtraIncome(${i})" class="text-xs text-rose-500 hover:underline">ลบ</button>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        extraContainer.classList.add('hidden');
+      }
+
+      // Tab 2: Expense Checklist Table
+      document.getElementById('strip-total').textContent = '฿' + fmt(totalExpense);
+      document.getElementById('strip-paid').textContent = '฿' + fmt(paidTotal);
+      document.getElementById('strip-unpaid').textContent = '฿' + fmt(unpaidTotal);
+
+      const q = (document.getElementById('search-expense').value || '').toLowerCase();
+      const catFilter = document.getElementById('filter-category').value;
+      const statusFilter = document.getElementById('filter-status').value;
+
+      const filteredExps = exps.filter(item => {
+        if (q && !item.name.toLowerCase().includes(q) && !item.note.toLowerCase().includes(q)) return false;
+        if (catFilter !== 'ALL' && item.category !== catFilter) return false;
+        if (statusFilter === 'PAID' && !item.isPaid) return false;
+        if (statusFilter === 'UNPAID' && item.isPaid) return false;
+        return true;
+      });
+
+      const tbody = document.getElementById('expense-table-body');
+      if (filteredExps.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-400">ไม่พบรายการที่ตรงกับเงื่อนไข</td></tr>`;
+      } else {
+        tbody.innerHTML = filteredExps.map(item => `
+          <tr class="${item.isPaid ? 'bg-emerald-50/40' : 'hover:bg-slate-50'} transition">
+            <td class="py-3 px-3 text-center">
+              <input type="checkbox" ${item.isPaid ? 'checked' : ''} onchange="togglePaid(${item.id})" class="custom-checkbox" />
+            </td>
+            <td class="py-3 px-3 font-medium ${item.isPaid ? 'line-through text-slate-400' : 'text-slate-800'}">
+              ${item.name}
+            </td>
+            <td class="py-3 px-3">
+              <span class="text-xs font-heading px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">${item.category}</span>
+            </td>
+            <td class="py-3 px-3 text-slate-500 text-xs">${item.note}</td>
+            <td class="py-3 px-3 text-right font-num font-semibold ${item.isPaid ? 'text-emerald-700' : 'text-slate-800'}">
+              ฿${fmt(item.amount)}
+            </td>
+            <td class="py-3 px-3 text-center">
+              <button onclick="deleteExpense(${item.id})" class="text-xs text-slate-400 hover:text-rose-600 px-2 py-1 rounded-lg hover:bg-rose-50 transition">ลบ</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      // Tab 3: Multi-Month Projection Table
+      renderProjectionTable();
+      switchTab(state.activeTab);
+    }
+
+    function renderProjectionTable() {
+      const thead = document.getElementById('projection-thead');
+      const tbody = document.getElementById('projection-tbody');
+
+      thead.innerHTML = `
+        <tr class="bg-tealPrimary text-white text-xs font-heading">
+          <th class="py-3 px-3 rounded-tl-xl">หมวดหมู่ / สรุปยอด</th>
+          ${state.months.map(mon => `<th class="py-3 px-3 text-right whitespace-nowrap">${mon}</th>`).join('')}
+          <th class="py-3 px-3 rounded-tr-xl text-right whitespace-nowrap">รวมทั้งหมด</th>
+        </tr>
+      `;
+
+      const catNames = [
+        'ค่าใช้จ่ายจำเป็น (40%)',
+        'ภาระผ่อนหนี้ (30%)',
+        'เงินออม + ลงทุน (20%)',
+        'เงินใช้ส่วนตัว (10%)'
+      ];
+
+      const rows = [];
+
+      catNames.forEach(cat => {
+        let rowTotal = 0;
+        const cells = state.months.map(mon => {
+          const val = getMonthExpenses(mon).filter(e => e.category === cat).reduce((s, e) => s + e.amount, 0);
+          rowTotal += val;
+          return `<td class="py-2.5 px-3 text-right font-num text-slate-700">฿${fmt(val)}</td>`;
+        });
+        rows.push(`
+          <tr class="hover:bg-slate-50">
+            <td class="py-2.5 px-3 font-medium text-slate-800 whitespace-nowrap">${cat}</td>
+            ${cells.join('')}
+            <td class="py-2.5 px-3 text-right font-num font-semibold text-slate-800">฿${fmt(rowTotal)}</td>
+          </tr>
+        `);
+      });
+
+      // Total Expense Row
+      let grandExp = 0;
+      const expCells = state.months.map(mon => {
+        const val = getMonthExpenses(mon).reduce((s, e) => s + e.amount, 0);
+        grandExp += val;
+        return `<td class="py-2.5 px-3 text-right font-num font-bold text-slate-900">฿${fmt(val)}</td>`;
+      });
+      rows.push(`
+        <tr class="bg-slate-100/80 font-semibold">
+          <td class="py-2.5 px-3 font-heading text-slate-900 whitespace-nowrap">💳 รวมรายจ่ายทั้งหมด</td>
+          ${expCells.join('')}
+          <td class="py-2.5 px-3 text-right font-num font-bold text-slate-900">฿${fmt(grandExp)}</td>
+        </tr>
+      `);
+
+      // Total Income Row
+      let grandInc = 0;
+      const incCells = state.months.map(mon => {
+        const val = getMonthIncome(mon).total;
+        grandInc += val;
+        return `<td class="py-2.5 px-3 text-right font-num font-semibold text-tealPrimary">฿${fmt(val)}</td>`;
+      });
+      rows.push(`
+        <tr>
+          <td class="py-2.5 px-3 font-heading font-semibold text-tealPrimary whitespace-nowrap">💵 รายรับรวมต่อเดือน</td>
+          ${incCells.join('')}
+          <td class="py-2.5 px-3 text-right font-num font-bold text-tealPrimary">฿${fmt(grandInc)}</td>
+        </tr>
+      `);
+
+      // Net Cashflow Row
+      let grandNet = 0;
+      const netCells = state.months.map(mon => {
+        const net = getMonthIncome(mon).total - getMonthExpenses(mon).reduce((s, e) => s + e.amount, 0);
+        grandNet += net;
+        const cls = net < 0 ? 'text-dangerText bg-dangerSoft/60' : 'text-okText bg-okSoft/60';
+        return `<td class="py-2.5 px-3 text-right font-num font-bold ${cls}">${net < 0 ? '-฿' : '+฿'}${fmt(Math.abs(net))}</td>`;
+      });
+      const grandCls = grandNet < 0 ? 'text-dangerText' : 'text-okText';
+      rows.push(`
+        <tr class="border-t-2 border-slate-200">
+          <td class="py-3 px-3 font-heading font-bold text-slate-900 whitespace-nowrap">📊 กระแสเงินสดสุทธิ</td>
+          ${netCells.join('')}
+          <td class="py-3 px-3 text-right font-num font-bold ${grandCls}">${grandNet < 0 ? '-฿' : '+฿'}${fmt(Math.abs(grandNet))}</td>
+        </tr>
+      `);
+
+      tbody.innerHTML = rows.join('');
+    }
+
+    // Initial Render
+    renderAll();
+  </script>
+</body>
+</html>

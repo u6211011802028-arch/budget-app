@@ -1,0 +1,313 @@
+import React, { useMemo, useState } from 'react';
+import { Plus, Search, Trash2 } from 'lucide-react';
+import { BudgetState } from '../types/budget';
+import { EXPENSE_CATEGORY_OPTIONS, fmt, getMonthExpenses, getMonthIncome } from '../data/defaultBudget';
+
+interface TransactionsViewProps {
+  state: BudgetState;
+  onUpdateBaseIncome: (salary: number, side: number) => void;
+  onDeleteExtraIncome: (index: number) => void;
+  onTogglePaid: (expenseId: number) => void;
+  onRequestDeleteExpense: (expenseId: number, name: string) => void;
+  onOpenIncomeModal: () => void;
+  onOpenExpenseModal: () => void;
+}
+
+export const TransactionsView: React.FC<TransactionsViewProps> = ({
+  state,
+  onUpdateBaseIncome,
+  onDeleteExtraIncome,
+  onTogglePaid,
+  onRequestDeleteExpense,
+  onOpenIncomeModal,
+  onOpenExpenseModal,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'UNPAID' | 'PAID'>('ALL');
+
+  const m = state.activeMonth;
+  const incData = useMemo(() => getMonthIncome(state, m), [state, m]);
+  const exps = useMemo(() => getMonthExpenses(state, m), [state, m]);
+
+  const totalExpense = exps.reduce((s, e) => s + e.amount, 0);
+  const paidTotal = exps.filter((e) => e.isPaid).reduce((s, e) => s + e.amount, 0);
+  const unpaidTotal = exps.filter((e) => !e.isPaid).reduce((s, e) => s + e.amount, 0);
+
+  const filteredExps = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return exps.filter((item) => {
+      if (
+        q &&
+        !item.name.toLowerCase().includes(q) &&
+        !item.note.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+      if (categoryFilter !== 'ALL' && item.category !== categoryFilter) return false;
+      if (statusFilter === 'PAID' && !item.isPaid) return false;
+      if (statusFilter === 'UNPAID' && item.isPaid) return false;
+      return true;
+    });
+  }, [exps, searchQuery, categoryFilter, statusFilter]);
+
+  return (
+    <section className="space-y-6">
+      {/* Income Section */}
+      <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+              รายรับประจำเดือน · {m}
+            </h2>
+            <p className="text-xs text-slate-500">
+              ปรับแก้เงินเดือนหลัก รายได้เสริม หรือเพิ่มรายการรายรับพิเศษเฉพาะเดือนได้ทันที
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenIncomeModal}
+            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-heading text-xs sm:text-sm font-medium px-3.5 py-2 rounded-lg transition self-start sm:self-auto whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            <span>เพิ่มรายการรายรับ</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <label
+              htmlFor="input-salary"
+              className="block text-xs font-heading text-slate-500 mb-1.5"
+            >
+              เงินเดือน / รายได้หลัก (บาท)
+            </label>
+            <input
+              id="input-salary"
+              type="number"
+              step="0.01"
+              value={incData.salary}
+              onChange={(e) =>
+                onUpdateBaseIncome(Number(e.target.value) || 0, incData.side)
+              }
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <label
+              htmlFor="input-side-income"
+              className="block text-xs font-heading text-slate-500 mb-1.5"
+            >
+              รายได้เสริม / OT (บาท)
+            </label>
+            <input
+              id="input-side-income"
+              type="number"
+              step="0.01"
+              value={incData.side}
+              onChange={(e) =>
+                onUpdateBaseIncome(incData.salary, Number(e.target.value) || 0)
+              }
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-[#E6F3F2] border border-[#006A63]/20 flex flex-col justify-center">
+            <span className="text-xs font-heading text-[#006A63]">
+              รวมรายรับทั้งหมดเดือนนี้
+            </span>
+            <span className="text-2xl font-num font-bold text-[#006A63] mt-0.5">
+              ฿{fmt(incData.total)}
+            </span>
+          </div>
+        </div>
+
+        {incData.extras.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="text-xs font-heading font-semibold text-slate-500 mb-2">
+              รายการรายรับเพิ่มเติมในเดือนนี้
+            </div>
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+              {incData.extras.map((ex, idx) => (
+                <div
+                  key={`${ex.name}-${idx}`}
+                  className="flex items-center justify-between px-3.5 py-2 bg-white text-sm"
+                >
+                  <span className="text-slate-700 font-medium">{ex.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-num font-semibold text-emerald-700">
+                      +฿{fmt(ex.amount)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteExtraIncome(idx)}
+                      className="text-xs text-rose-600 hover:underline"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Expense Checklist */}
+      <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+              เช็กลิสต์ค่าใช้จ่ายประจำเดือน · {m}
+            </h2>
+            <p className="text-xs text-slate-500">
+              ติ๊กช่องชำระแล้วเพื่ออัปเดตยอดคงเหลืออัตโนมัติ หรือเพิ่มรายการใหม่ได้ทันที
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ค้นหารายการ..."
+                className="border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-sm focus:outline-none focus:border-[#006A63]"
+              />
+            </div>
+
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+            >
+              <option value="ALL">ทุกหมวดหมู่</option>
+              {EXPENSE_CATEGORY_OPTIONS.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(e.target.value as 'ALL' | 'UNPAID' | 'PAID')
+              }
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+            >
+              <option value="ALL">ทุกสถานะ</option>
+              <option value="UNPAID">รอชำระ</option>
+              <option value="PAID">ชำระแล้ว</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={onOpenExpenseModal}
+              className="inline-flex items-center gap-1 bg-[#006A63] hover:bg-[#004D48] text-white font-heading text-sm font-medium px-3.5 py-1.5 rounded-lg transition whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              <span>เพิ่มรายจ่าย</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Summary Strip (unboxed hairline grid) */}
+        <div className="grid grid-cols-3 gap-4 py-3 px-4 mb-4 rounded-lg bg-slate-50 border border-slate-200">
+          <div>
+            <div className="text-xs text-slate-500 font-heading">ยอดรวมเดือนนี้</div>
+            <div className="text-base sm:text-lg font-num font-bold text-slate-900">
+              ฿{fmt(totalExpense)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-[#0F766E] font-heading">ชำระแล้ว</div>
+            <div className="text-base sm:text-lg font-num font-bold text-[#0F766E]">
+              ฿{fmt(paidTotal)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-amber-700 font-heading">รอชำระ</div>
+            <div className="text-base sm:text-lg font-num font-bold text-amber-700">
+              ฿{fmt(unpaidTotal)}
+            </div>
+          </div>
+        </div>
+
+        {/* Expense Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[#006A63] text-white text-xs font-heading">
+                <th className="py-3 px-3 rounded-tl-lg w-16 text-center">จ่ายแล้ว</th>
+                <th className="py-3 px-3">รายการค่าใช้จ่าย</th>
+                <th className="py-3 px-3">หมวดหมู่ (40-30-20-10)</th>
+                <th className="py-3 px-3">ครบกำหนด / หมายเหตุ</th>
+                <th className="py-3 px-3 text-right">จำนวนเงิน (บาท)</th>
+                <th className="py-3 px-3 rounded-tr-lg text-center w-20">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {filteredExps.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-slate-400">
+                    ไม่พบรายการที่ตรงกับเงื่อนไข
+                  </td>
+                </tr>
+              ) : (
+                filteredExps.map((item) => (
+                  <tr
+                    key={item.id}
+                    className={`transition ${
+                      item.isPaid ? 'bg-emerald-50/40' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <td className="py-2.5 px-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={item.isPaid}
+                        onChange={() => onTogglePaid(item.id)}
+                        className="w-4 h-4 accent-[#006A63] rounded cursor-pointer"
+                        aria-label={`ทำเครื่องหมาย ${item.name} ว่าชำระแล้ว`}
+                      />
+                    </td>
+                    <td
+                      className={`py-2.5 px-3 font-medium ${
+                        item.isPaid ? 'line-through text-slate-400' : 'text-slate-900'
+                      }`}
+                    >
+                      {item.name}
+                    </td>
+                    <td className="py-2.5 px-3 text-xs text-slate-600 font-heading">
+                      {item.category}
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-500 text-xs">{item.note}</td>
+                    <td
+                      className={`py-2.5 px-3 text-right font-num font-semibold ${
+                        item.isPaid ? 'text-[#0F766E]' : 'text-slate-900'
+                      }`}
+                    >
+                      ฿{fmt(item.amount)}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => onRequestDeleteExpense(item.id, item.name)}
+                        className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-rose-600 px-2 py-1 rounded-md hover:bg-rose-50 transition"
+                        aria-label={`ลบ ${item.name}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+};
