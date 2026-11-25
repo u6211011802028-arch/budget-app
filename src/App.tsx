@@ -518,11 +518,16 @@ export default function App() {
     category: BudgetCategory;
     recurring: boolean;
     recurringEndMonth: string;
+    recurringMonths: number;
     paid: boolean;
   }) => {
     setState((prev) => {
       const startIdx = prev.months.indexOf(prev.activeMonth);
-      const futureSeq = buildFutureMonthSequence(prev.months, prev.activeMonth, 12);
+      const futureSeq = buildFutureMonthSequence(
+        prev.months,
+        prev.activeMonth,
+        Math.max(36, (data.recurringMonths || 12) + 6)
+      );
       const endIdxInSeq = data.recurringEndMonth
         ? futureSeq.findIndex((item) => item.month === data.recurringEndMonth)
         : -1;
