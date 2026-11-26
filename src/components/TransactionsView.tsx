@@ -5,7 +5,12 @@ import { EXPENSE_CATEGORY_OPTIONS, fmt, getMonthExpenses, getMonthIncome } from 
 
 interface TransactionsViewProps {
   state: BudgetState;
-  onUpdateBaseIncome: (salary: number, side: number) => void;
+  onUpdateBaseIncome: (salary: number, salary29: number, side: number) => void;
+  onUpdatePayrollDeductions: (
+    socialSecurity: number,
+    providentFund: number,
+    applyFutureMonths: boolean
+  ) => void;
   onEditExtraIncome: (index: number, item: ExtraIncomeItem) => void;
   onDeleteExtraIncome: (index: number) => void;
   onTogglePaid: (expenseId: number) => void;
@@ -18,6 +23,7 @@ interface TransactionsViewProps {
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   state,
   onUpdateBaseIncome,
+  onUpdatePayrollDeductions,
   onEditExtraIncome,
   onDeleteExtraIncome,
   onTogglePaid,
@@ -29,6 +35,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'UNPAID' | 'PAID'>('ALL');
+  const [applyDeductionsMonthly, setApplyDeductionsMonthly] = useState(true);
 
   const m = state.activeMonth;
   const incData = useMemo(() => getMonthIncome(state, m), [state, m]);
@@ -65,7 +72,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               รายรับประจำเดือน · {m}
             </h2>
             <p className="text-xs text-slate-500">
-              ปรับแก้เงินเดือนหลัก รายได้เสริม หรือเพิ่มรายการรายรับพิเศษเฉพาะเดือนได้ทันที
+              ปรับแก้เงินเดือน รายได้เสริม และรายการหักประจำ (ประกันสังคม / กองทุนสำรองเลี้ยงชีพ) ได้ทันที
             </p>
           </div>
           <button
@@ -78,13 +85,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
             <label
               htmlFor="input-salary"
               className="block text-xs font-heading text-slate-500 mb-1.5"
             >
-              เงินเดือน / รายได้หลัก (บาท)
+              เงินเดือนรอบวันที่ 14 (บาท)
             </label>
             <input
               id="input-salary"
@@ -92,7 +99,34 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               step="0.01"
               value={incData.salary}
               onChange={(e) =>
-                onUpdateBaseIncome(Number(e.target.value) || 0, incData.side)
+                onUpdateBaseIncome(
+                  Number(e.target.value) || 0,
+                  incData.salary29,
+                  incData.side
+                )
+              }
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <label
+              htmlFor="input-salary-29"
+              className="block text-xs font-heading text-slate-500 mb-1.5"
+            >
+              เงินเดือนรอบวันที่ 29 (บาท)
+            </label>
+            <input
+              id="input-salary-29"
+              type="number"
+              step="0.01"
+              value={incData.salary29}
+              onChange={(e) =>
+                onUpdateBaseIncome(
+                  incData.salary,
+                  Number(e.target.value) || 0,
+                  incData.side
+                )
               }
               className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
             />
@@ -111,21 +145,121 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               step="0.01"
               value={incData.side}
               onChange={(e) =>
-                onUpdateBaseIncome(incData.salary, Number(e.target.value) || 0)
+                onUpdateBaseIncome(
+                  incData.salary,
+                  incData.salary29,
+                  Number(e.target.value) || 0
+                )
               }
               className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
+            />
+          </div>
+        </div>
+
+        {/* Payroll Recurring Deductions + Net Summary */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+          <div className="p-3.5 rounded-lg bg-rose-50/50 border border-rose-200/80">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label
+                htmlFor="input-social-security"
+                className="block text-xs font-heading font-medium text-rose-800"
+              >
+                หักประกันสังคม (บาท)
+              </label>
+              <span className="text-[11px] font-heading text-rose-600/90">
+                หักประจำ/เดือน
+              </span>
+            </div>
+            <input
+              id="input-social-security"
+              type="number"
+              step="0.01"
+              min="0"
+              value={incData.socialSecurity}
+              onChange={(e) =>
+                onUpdatePayrollDeductions(
+                  Math.max(0, Number(e.target.value) || 0),
+                  incData.providentFund,
+                  applyDeductionsMonthly
+                )
+              }
+              className="w-full bg-white border border-rose-200 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-rose-500"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-rose-50/50 border border-rose-200/80">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label
+                htmlFor="input-provident-fund"
+                className="block text-xs font-heading font-medium text-rose-800"
+              >
+                หักกองทุนสำรองเลี้ยงชีพ (บาท)
+              </label>
+              <span className="text-[11px] font-heading text-rose-600/90">
+                หักประจำ/เดือน
+              </span>
+            </div>
+            <input
+              id="input-provident-fund"
+              type="number"
+              step="0.01"
+              min="0"
+              value={incData.providentFund}
+              onChange={(e) =>
+                onUpdatePayrollDeductions(
+                  incData.socialSecurity,
+                  Math.max(0, Number(e.target.value) || 0),
+                  applyDeductionsMonthly
+                )
+              }
+              className="w-full bg-white border border-rose-200 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-rose-500"
             />
           </div>
 
           <div className="p-3.5 rounded-lg bg-[#E6F3F2] border border-[#006A63]/20 flex flex-col justify-center">
             <span className="text-xs font-heading text-[#006A63]">
-              รวมรายรับทั้งหมดเดือนนี้
+              {incData.deductionsTotal > 0
+                ? 'รายรับสุทธิหลังหักเดือนนี้'
+                : 'รวมรายรับทั้งหมดเดือนนี้'}
             </span>
             <span className="text-2xl font-num font-bold text-[#006A63] mt-0.5">
               ฿{fmt(incData.total)}
             </span>
+            {incData.deductionsTotal > 0 ? (
+              <span className="text-[11px] font-num text-[#004D48]/85 mt-0.5">
+                รับรวม ฿{fmt(incData.grossTotal)} · หัก -฿{fmt(incData.deductionsTotal)}
+              </span>
+            ) : (
+              incData.salary29 > 0 && (
+                <span className="text-[11px] font-num text-[#004D48]/80 mt-0.5">
+                  เงินเดือนรวม 2 รอบ ฿{fmt(incData.salaryTotal)}
+                </span>
+              )
+            )}
           </div>
         </div>
+
+        <label className="inline-flex items-center gap-2 text-xs font-heading text-slate-600 cursor-pointer mt-3">
+          <input
+            type="checkbox"
+            checked={applyDeductionsMonthly}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setApplyDeductionsMonthly(checked);
+              if (checked) {
+                onUpdatePayrollDeductions(
+                  incData.socialSecurity,
+                  incData.providentFund,
+                  true
+                );
+              }
+            }}
+            className="w-3.5 h-3.5 accent-[#006A63] rounded"
+          />
+          <span>
+            หักประกันสังคมและกองทุนสำรองเลี้ยงชีพยอดนี้ประจำทุกเดือน (ตั้งแต่ {m} เป็นต้นไป)
+          </span>
+        </label>
 
         {incData.extras.length > 0 && (
           <div className="mt-4 pt-4 border-t border-slate-100">

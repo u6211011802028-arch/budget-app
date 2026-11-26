@@ -365,23 +365,59 @@ function parseMatrixFormat(
 
   const incomes: Record<string, MonthIncome> = {};
   months.forEach((m) => {
-    incomes[m] = { salary: 21000, side: 0, extras: [] };
+    incomes[m] = {
+      salary: 21000,
+      salary29: 0,
+      side: 0,
+      extras: [],
+      socialSecurity: 0,
+      providentFund: 0,
+    };
   });
 
   // Parse optional income tab
   if (incomeTabRows && incomeTabRows.length >= 2) {
     const incHeader = incomeTabRows[0].map((h) => String(h || '').trim().toLowerCase());
     const mCol = incHeader.findIndex((h) => h.includes('เดือน') || h.includes('month'));
-    const salCol = incHeader.findIndex((h) => h.includes('เงินเดือน') || h.includes('salary'));
+    const sal29Col = incHeader.findIndex(
+      (h) =>
+        (h.includes('เงินเดือน') || h.includes('salary') || h.includes('รอบ')) &&
+        h.includes('29')
+    );
+    const salCol = incHeader.findIndex(
+      (h) => (h.includes('เงินเดือน') || h.includes('salary')) && !h.includes('29')
+    );
     const sideCol = incHeader.findIndex((h) => h.includes('เสริม') || h.includes('side') || h.includes('ot'));
     const extraCol = incHeader.findIndex((h) => h.includes('พิเศษ') || h.includes('extra'));
+    const ssoCol = incHeader.findIndex(
+      (h) => h.includes('ประกันสังคม') || h.includes('sso') || h.includes('social')
+    );
+    const pvdCol = incHeader.findIndex(
+      (h) =>
+        h.includes('สำรองเลี้ยงชีพ') ||
+        h.includes('กองทุน') ||
+        h.includes('pvd') ||
+        h.includes('provident')
+    );
 
     incomeTabRows.slice(1).forEach((row) => {
       const mLabel = normalizeMonthLabel(row[mCol >= 0 ? mCol : 0] || '');
       if (!mLabel) return;
-      if (!incomes[mLabel]) incomes[mLabel] = { salary: 0, side: 0, extras: [] };
+      if (!incomes[mLabel]) {
+        incomes[mLabel] = {
+          salary: 0,
+          salary29: 0,
+          side: 0,
+          extras: [],
+          socialSecurity: 0,
+          providentFund: 0,
+        };
+      }
       if (salCol >= 0) incomes[mLabel].salary = parseNumericCell(row[salCol]);
+      if (sal29Col >= 0) incomes[mLabel].salary29 = parseNumericCell(row[sal29Col]);
       if (sideCol >= 0) incomes[mLabel].side = parseNumericCell(row[sideCol]);
+      if (ssoCol >= 0) incomes[mLabel].socialSecurity = Math.max(0, parseNumericCell(row[ssoCol]));
+      if (pvdCol >= 0) incomes[mLabel].providentFund = Math.max(0, parseNumericCell(row[pvdCol]));
       if (extraCol >= 0) {
         const extraAmt = parseNumericCell(row[extraCol]);
         if (extraAmt > 0) {
@@ -439,14 +475,25 @@ function parseMatrixFormat(
       if (!sawIncomeRowInMainSheet && !(incomeTabRows && incomeTabRows.length >= 2)) {
         // Reset default 21000 only if income rows exist directly in main sheet
         months.forEach((m) => {
-          incomes[m] = { salary: 0, side: 0, extras: [] };
+          incomes[m] = {
+            salary: 0,
+            salary29: 0,
+            side: 0,
+            extras: [],
+            socialSecurity: 0,
+            providentFund: 0,
+          };
         });
         sawIncomeRowInMainSheet = true;
       }
       monthColumns.forEach((mc) => {
         const amt = parseNumericCell(row[mc.colIdx]);
         if (lowerName.includes('เงินเดือน') || lowerName.includes('salary')) {
-          incomes[mc.label].salary += amt;
+          if (lowerName.includes('29')) {
+            incomes[mc.label].salary29 = (incomes[mc.label].salary29 || 0) + amt;
+          } else {
+            incomes[mc.label].salary += amt;
+          }
         } else if (lowerName.includes('เสริม') || lowerName.includes('ot')) {
           incomes[mc.label].side += amt;
         } else if (amt > 0) {
@@ -565,7 +612,7 @@ function parseTransactionLogFormat(
     monthsSet.add(monthLabel);
 
     if (!incomes[monthLabel]) {
-      incomes[monthLabel] = { salary: 0, side: 0, extras: [] };
+      incomes[monthLabel] = { salary: 0, salary29: 0, side: 0, extras: [] };
     }
 
     const rawType = typeCol >= 0 ? String(row[typeCol] || '').toLowerCase() : '';
@@ -581,7 +628,12 @@ function parseTransactionLogFormat(
     if (isIncome && !rawType.includes('รายจ่าย') && !rawType.includes('จ่าย')) {
       const lowerName = rawName.toLowerCase();
       if (lowerName.includes('เงินเดือน') || lowerName.includes('salary')) {
-        incomes[monthLabel].salary += Math.abs(amount);
+        if (lowerName.includes('29')) {
+          incomes[monthLabel].salary29 =
+            (incomes[monthLabel].salary29 || 0) + Math.abs(amount);
+        } else {
+          incomes[monthLabel].salary += Math.abs(amount);
+        }
       } else if (lowerName.includes('เสริม') || lowerName.includes('ot')) {
         incomes[monthLabel].side += Math.abs(amount);
       } else {
@@ -629,7 +681,16 @@ function parseTransactionLogFormat(
   });
 
   months.forEach((m) => {
-    if (!incomes[m]) incomes[m] = { salary: 0, side: 0, extras: [] };
+    if (!incomes[m]) {
+      incomes[m] = {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
+      };
+    }
   });
 
   const activeMonth = months.includes(previousState.activeMonth)
@@ -710,11 +771,34 @@ export async function writeBudgetStateToTabs(
   ];
 
   if (includeHelperTabs) {
-    const incomeHeaders = ['เดือน', 'เงินเดือนหลัก', 'รายได้เสริม', 'รายรับพิเศษ'];
+    const incomeHeaders = [
+      'เดือน',
+      'เงินเดือนรอบวันที่ 14',
+      'เงินเดือนรอบวันที่ 29',
+      'รายได้เสริม',
+      'รายรับพิเศษ',
+      'หักประกันสังคม',
+      'หักกองทุนสำรองเลี้ยงชีพ',
+    ];
     const incomeRows = state.months.map((m) => {
-      const inc = state.incomes[m] || { salary: 0, side: 0, extras: [] };
+      const inc = state.incomes[m] || {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
+      };
       const extraSum = (inc.extras || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
-      return [m, Number(inc.salary) || 0, Number(inc.side) || 0, extraSum];
+      return [
+        m,
+        Number(inc.salary) || 0,
+        Number(inc.salary29) || 0,
+        Number(inc.side) || 0,
+        extraSum,
+        Number(inc.socialSecurity) || 0,
+        Number(inc.providentFund) || 0,
+      ];
     });
 
     const paidHeaders = ['รายการ', ...state.months];

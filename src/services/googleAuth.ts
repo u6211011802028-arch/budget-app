@@ -46,15 +46,10 @@ try {
   });
 }
 
-const provider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => provider.addScope(scope));
-provider.setCustomParameters({
-  prompt: 'select_account',
-});
-
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 let cachedExpiresAt = 0;
+let silentRefreshInFlight: Promise<string | null> | null = null;
 
 function saveTokenToStorage(
   accessToken: string,
@@ -126,11 +121,127 @@ export const getStoredUserProfile = (): {
   email: string | null;
 } | null => {
   const stored = loadTokenFromStorage();
-  if (!stored) return null;
-  return {
-    displayName: stored.displayName ?? null,
-    email: stored.email ?? null,
-  };
+  if (stored) {
+    return {
+      displayName: stored.displayName ?? null,
+      email: stored.email ?? null,
+    };
+  }
+  if (auth.currentUser) {
+    return {
+      displayName: auth.currentUser.displayName ?? null,
+      email: auth.currentUser.email ?? null,
+    };
+  }
+  return null;
+};
+
+async function waitForGisOAuth2(timeoutMs = 1500): Promise<any | null> {
+  const w = window as any;
+  if (w.google?.accounts?.oauth2?.initTokenClient) {
+    return w.google.accounts.oauth2;
+  }
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (w.google?.accounts?.oauth2?.initTokenClient) {
+        resolve(w.google.accounts.oauth2);
+        return;
+      }
+      if (Date.now() - start >= timeoutMs) {
+        resolve(null);
+        return;
+      }
+      window.setTimeout(check, 80);
+    };
+    check();
+  });
+}
+
+/**
+ * Attempts a silent Google OAuth2 access token refresh via Google Identity Services
+ * using `prompt: 'none'` and the current Firebase user's email hint.
+ * Succeeds without UI in standalone browsers when third-party/session cookies permit.
+ */
+export const refreshAccessTokenSilently = async (
+  hintEmail?: string | null
+): Promise<string | null> => {
+  if (silentRefreshInFlight) {
+    return silentRefreshInFlight;
+  }
+
+  silentRefreshInFlight = (async () => {
+    const clientId = (firebaseConfig as any)?.oAuthClientId as string | undefined;
+    const email = hintEmail ?? auth.currentUser?.email;
+    if (!clientId || !email) {
+      return null;
+    }
+
+    const oauth2 = await waitForGisOAuth2(1500);
+    if (!oauth2) {
+      return null;
+    }
+
+    return new Promise<string | null>((resolve) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(null);
+        }
+      }, 4000);
+
+      const finish = (token: string | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(token);
+      };
+
+      try {
+        const tokenClient = oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES.join(' '),
+          hint: email,
+          callback: (resp: any) => {
+            if (resp?.error || !resp?.access_token) {
+              finish(null);
+              return;
+            }
+            const ttlSec = Number(resp.expires_in) || DEFAULT_TOKEN_TTL_SEC;
+            const expiresAt =
+              Date.now() + ttlSec * 1000 - EXPIRY_SAFETY_BUFFER_MS;
+            saveTokenToStorage(resp.access_token, expiresAt, auth.currentUser);
+            finish(resp.access_token);
+          },
+          error_callback: () => {
+            finish(null);
+          },
+        });
+
+        tokenClient.requestAccessToken({ prompt: 'none' });
+      } catch {
+        finish(null);
+      }
+    });
+  })();
+
+  try {
+    return await silentRefreshInFlight;
+  } finally {
+    silentRefreshInFlight = null;
+  }
+};
+
+export const getTokenRemainingMs = (): number => {
+  if (cachedAccessToken && cachedExpiresAt > Date.now()) {
+    return cachedExpiresAt - Date.now();
+  }
+  const stored = loadTokenFromStorage(auth.currentUser?.uid);
+  if (stored && stored.expiresAt > Date.now()) {
+    return stored.expiresAt - Date.now();
+  }
+  return 0;
 };
 
 export const initAuth = (
@@ -160,6 +271,17 @@ export const initAuth = (
       }
 
       if (!isSigningIn) {
+        // Attempt silent token renewal before asking the user to click Sign in
+        const silentlyRefreshed = await refreshAccessTokenSilently(
+          currentUser.email
+        );
+        if (cancelled) return;
+
+        if (silentlyRefreshed) {
+          onAuthSuccess?.(currentUser, silentlyRefreshed);
+          return;
+        }
+
         removeTokenFromStorage();
         onAuthFailure?.(currentUser);
       }
@@ -182,7 +304,20 @@ export const googleSignIn = async (): Promise<{
   try {
     isSigningIn = true;
     await setPersistence(auth, browserLocalPersistence);
-    const result = await signInWithPopup(auth, provider);
+
+    const activeProvider = new GoogleAuthProvider();
+    SCOPES.forEach((scope) => activeProvider.addScope(scope));
+    if (auth.currentUser?.email) {
+      activeProvider.setCustomParameters({
+        login_hint: auth.currentUser.email,
+      });
+    } else {
+      activeProvider.setCustomParameters({
+        prompt: 'select_account',
+      });
+    }
+
+    const result = await signInWithPopup(auth, activeProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error(

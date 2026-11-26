@@ -27,9 +27,11 @@ import {
   clearCachedToken,
   getAccessToken,
   getStoredUserProfile,
+  getTokenRemainingMs,
   googleSignIn,
   initAuth,
   logout,
+  refreshAccessTokenSilently,
 } from './services/googleAuth';
 import {
   AuthExpiredError,
@@ -58,6 +60,8 @@ const SHEET_PREF_KEY = 'thai_budget_sheet_pref_v1';
 
 interface SavedSheetPref {
   spreadsheetId: string;
+  spreadsheetTitle?: string;
+  spreadsheetUrl?: string;
   selectedSheetTitle: string;
   autoRefreshSec: number;
 }
@@ -112,6 +116,9 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
   // Google Sheets Connection State
+  const [savedSheetPref, setSavedSheetPref] = useState<SavedSheetPref | null>(
+    loadSheetPref
+  );
   const [sheetConn, setSheetConn] = useState<SheetConnection | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -143,16 +150,19 @@ export default function App() {
     }
   }, [state]);
 
-  // Save sheet connection preference (ID & tab name only, never tokens)
+  // Save sheet connection preference (ID, title & tab name only, never tokens)
   useEffect(() => {
     try {
       if (sheetConn) {
         const pref: SavedSheetPref = {
           spreadsheetId: sheetConn.spreadsheetId,
+          spreadsheetTitle: sheetConn.spreadsheetTitle,
+          spreadsheetUrl: sheetConn.spreadsheetUrl,
           selectedSheetTitle: sheetConn.selectedSheetTitle,
           autoRefreshSec: sheetConn.autoRefreshSec,
         };
         localStorage.setItem(SHEET_PREF_KEY, JSON.stringify(pref));
+        setSavedSheetPref(pref);
       }
     } catch {
       // ignore
@@ -165,7 +175,10 @@ export default function App() {
       preferredTab?: string,
       autoRefreshOverride?: number
     ) => {
-      const token = getAccessToken();
+      let token = getAccessToken();
+      if (!token) {
+        token = await refreshAccessTokenSilently();
+      }
       if (!token) {
         setNeedsAuth(true);
         return;
@@ -174,8 +187,8 @@ export default function App() {
       setIsSyncing(true);
       setSyncError(null);
 
-      try {
-        const meta = await fetchSpreadsheetMeta(token, spreadsheetId);
+      const performSync = async (activeToken: string) => {
+        const meta = await fetchSpreadsheetMeta(activeToken, spreadsheetId);
         if (!meta.sheets.length) {
           throw new Error('ไม่พบแผ่นงาน (Sheet Tab) ในไฟล์สเปรดชีตนี้');
         }
@@ -186,7 +199,7 @@ export default function App() {
             : meta.sheets[0].title;
 
         const primaryRows = await fetchSheetValues(
-          token,
+          activeToken,
           meta.spreadsheetId,
           targetTab
         );
@@ -201,14 +214,18 @@ export default function App() {
 
         const [incomeRows, paidRows] = await Promise.all([
           incomeTab && incomeTab.title !== targetTab
-            ? fetchSheetValues(token, meta.spreadsheetId, incomeTab.title).catch(
-                () => null
-              )
+            ? fetchSheetValues(
+                activeToken,
+                meta.spreadsheetId,
+                incomeTab.title
+              ).catch(() => null)
             : Promise.resolve(null),
           paidTab && paidTab.title !== targetTab
-            ? fetchSheetValues(token, meta.spreadsheetId, paidTab.title).catch(
-                () => null
-              )
+            ? fetchSheetValues(
+                activeToken,
+                meta.spreadsheetId,
+                paidTab.title
+              ).catch(() => null)
             : Promise.resolve(null),
         ]);
 
@@ -244,9 +261,32 @@ export default function App() {
         setSyncBannerMsg(
           `ดึงข้อมูลล่าสุดจาก "${meta.title}" สำเร็จ (${parsed.rowCount} แถว)`
         );
+      };
+
+      try {
+        await performSync(token);
       } catch (err: any) {
         if (err instanceof AuthExpiredError) {
           clearCachedToken();
+          const renewed = await refreshAccessTokenSilently();
+          if (renewed) {
+            try {
+              await performSync(renewed);
+              return;
+            } catch (retryErr: any) {
+              if (retryErr instanceof AuthExpiredError) {
+                clearCachedToken();
+                setNeedsAuth(true);
+                setSyncError(retryErr.message);
+              } else {
+                setSyncError(
+                  retryErr?.message ||
+                    'เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Google Sheets'
+                );
+              }
+              return;
+            }
+          }
           setNeedsAuth(true);
           setSyncError(err.message);
         } else {
@@ -290,6 +330,18 @@ export default function App() {
     );
     return () => unsubscribe();
   }, [syncFromSpreadsheet]);
+
+  // Proactive silent token refresh before the 1-hour OAuth token expires
+  useEffect(() => {
+    if (needsAuth) return;
+    const timer = window.setInterval(() => {
+      const remaining = getTokenRemainingMs();
+      if (remaining > 0 && remaining < 5 * 60 * 1000) {
+        refreshAccessTokenSilently();
+      }
+    }, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [needsAuth]);
 
   // Real-time auto-refresh polling from connected Google Sheet
   useEffect(() => {
@@ -363,6 +415,7 @@ export default function App() {
 
   const handleDisconnectSheet = () => {
     setSheetConn(null);
+    setSavedSheetPref(null);
     localStorage.removeItem(SHEET_PREF_KEY);
     setSyncBannerMsg(null);
     setSyncError(null);
@@ -399,16 +452,66 @@ export default function App() {
     });
   };
 
-  const handleUpdateBaseIncome = (salary: number, side: number) => {
+  const handleUpdateBaseIncome = (
+    salary: number,
+    salary29: number,
+    side: number
+  ) => {
     setState((prev) => {
       const m = prev.activeMonth;
-      const existing = prev.incomes[m] || { salary: 0, side: 0, extras: [] };
+      const existing = prev.incomes[m] || {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
+      };
       return {
         ...prev,
         incomes: {
           ...prev.incomes,
-          [m]: { ...existing, salary, side },
+          [m]: { ...existing, salary, salary29, side },
         },
+      };
+    });
+  };
+
+  const handleUpdatePayrollDeductions = (
+    socialSecurity: number,
+    providentFund: number,
+    applyFutureMonths: boolean
+  ) => {
+    const cleanSso = Math.max(0, Number(socialSecurity) || 0);
+    const cleanPvd = Math.max(0, Number(providentFund) || 0);
+    setState((prev) => {
+      const m = prev.activeMonth;
+      const startIdx = prev.months.indexOf(m);
+      const nextIncomes = { ...prev.incomes };
+      const targetMonths =
+        applyFutureMonths && startIdx >= 0
+          ? prev.months.slice(startIdx)
+          : [m];
+
+      targetMonths.forEach((mon) => {
+        const existing = nextIncomes[mon] || {
+          salary: 0,
+          salary29: 0,
+          side: 0,
+          extras: [],
+          socialSecurity: 0,
+          providentFund: 0,
+        };
+        nextIncomes[mon] = {
+          ...existing,
+          socialSecurity: cleanSso,
+          providentFund: cleanPvd,
+        };
+      });
+
+      return {
+        ...prev,
+        incomes: nextIncomes,
       };
     });
   };
@@ -593,15 +696,22 @@ export default function App() {
   const handleAddIncome = (data: {
     name: string;
     amount: number;
-    type: 'extra' | 'side' | 'salary';
+    type: 'extra' | 'side' | 'salary' | 'salary29';
   }) => {
     setState((prev) => {
       const m = prev.activeMonth;
-      const existing = prev.incomes[m] || { salary: 0, side: 0, extras: [] };
+      const existing = prev.incomes[m] || {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+      };
       const updated = { ...existing, extras: [...(existing.extras || [])] };
 
       if (data.type === 'salary') {
         updated.salary = data.amount;
+      } else if (data.type === 'salary29') {
+        updated.salary29 = data.amount;
       } else if (data.type === 'side') {
         updated.side = (Number(updated.side) || 0) + data.amount;
       } else {
@@ -620,8 +730,11 @@ export default function App() {
       const prevMonth = prev.months[prev.months.length - 1];
       const prevInc = prev.incomes[prevMonth] || {
         salary: 21000,
+        salary29: 0,
         side: 0,
         extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
       };
 
       const nextExpenses = prev.expenses.map((exp) => {
@@ -660,8 +773,11 @@ export default function App() {
           ...prev.incomes,
           [newMonth]: {
             salary: copyPrev ? Number(prevInc.salary) || 0 : 0,
+            salary29: copyPrev ? Number(prevInc.salary29) || 0 : 0,
             side: 0,
             extras: [],
+            socialSecurity: copyPrev ? Number(prevInc.socialSecurity) || 0 : 0,
+            providentFund: copyPrev ? Number(prevInc.providentFund) || 0 : 0,
           },
         },
         expenses: nextExpenses,
@@ -977,12 +1093,27 @@ export default function App() {
           {/* Google Sheets Live Sync Controls */}
           <div className="flex flex-wrap items-center gap-2">
             {needsAuth ? (
-              <div className="flex items-center gap-3 text-xs text-slate-600">
-                <span>เชื่อมต่อ Google Sheets เพื่อดึงข้อมูลและอัปเดตกราฟอัตโนมัติ</span>
+              <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600">
+                {savedSheetPref ? (
+                  <span className="inline-flex items-center gap-1.5 text-slate-700 font-heading">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-[#006A63] shrink-0" />
+                    <span className="max-w-[200px] truncate">
+                      ไฟล์ที่ผูกไว้: {savedSheetPref.spreadsheetTitle || 'Google Sheets'}
+                    </span>
+                  </span>
+                ) : (
+                  <span>เชื่อมต่อ Google Sheets เพื่อดึงข้อมูลและอัปเดตกราฟอัตโนมัติ</span>
+                )}
                 <GoogleSignInButton
                   onClick={handleLogin}
                   disabled={isLoggingIn}
-                  label="เชื่อมต่อ Google"
+                  label={
+                    isLoggingIn
+                      ? 'กำลังเชื่อมต่อ...'
+                      : savedSheetPref
+                      ? 'ซิงก์ต่อทันที'
+                      : 'เชื่อมต่อ Google'
+                  }
                 />
               </div>
             ) : !sheetConn ? (
@@ -1109,6 +1240,7 @@ export default function App() {
           <TransactionsView
             state={state}
             onUpdateBaseIncome={handleUpdateBaseIncome}
+            onUpdatePayrollDeductions={handleUpdatePayrollDeductions}
             onEditExtraIncome={(index, item) =>
               setEditingExtraIncome({ index, name: item.name, amount: item.amount })
             }

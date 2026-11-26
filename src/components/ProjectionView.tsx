@@ -28,6 +28,12 @@ export const ProjectionView: React.FC<ProjectionViewProps> = ({
   );
   const grandIncome = monthIncomeTotals.reduce((a, b) => a + b, 0);
 
+  const monthDeductionTotals = state.months.map(
+    (mon) => getMonthIncome(state, mon).deductionsTotal
+  );
+  const grandDeductions = monthDeductionTotals.reduce((a, b) => a + b, 0);
+  const hasAnyDeductions = grandDeductions > 0;
+
   const grandNet = grandIncome - grandExpense;
 
   const urgencyBadgeClass = (level: string) => {
@@ -133,9 +139,28 @@ export const ProjectionView: React.FC<ProjectionViewProps> = ({
                 </td>
               </tr>
 
+              {hasAnyDeductions && (
+                <tr>
+                  <td className="py-2.5 px-3 font-heading text-rose-700 whitespace-nowrap">
+                    หักประกันสังคม + กองทุนสำรองเลี้ยงชีพ
+                  </td>
+                  {monthDeductionTotals.map((val, idx) => (
+                    <td
+                      key={state.months[idx]}
+                      className="py-2.5 px-3 text-right font-num text-rose-700"
+                    >
+                      {val > 0 ? `-฿${fmt(val)}` : '฿0.00'}
+                    </td>
+                  ))}
+                  <td className="py-2.5 px-3 text-right font-num font-semibold text-rose-700">
+                    -฿{fmt(grandDeductions)}
+                  </td>
+                </tr>
+              )}
+
               <tr>
                 <td className="py-2.5 px-3 font-heading font-semibold text-[#006A63] whitespace-nowrap">
-                  รายรับรวมต่อเดือน
+                  {hasAnyDeductions ? 'รายรับสุทธิต่อเดือน (หลังหัก)' : 'รายรับรวมต่อเดือน'}
                 </td>
                 {monthIncomeTotals.map((val, idx) => (
                   <td

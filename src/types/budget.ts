@@ -14,8 +14,11 @@ export interface ExtraIncomeItem {
 
 export interface MonthIncome {
   salary: number;
+  salary29?: number;
   side: number;
   extras: ExtraIncomeItem[];
+  socialSecurity?: number;
+  providentFund?: number;
 }
 
 export interface ExpenseItem {

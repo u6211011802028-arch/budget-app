@@ -385,7 +385,7 @@ interface AddIncomeModalProps {
   onSubmit: (data: {
     name: string;
     amount: number;
-    type: 'extra' | 'side' | 'salary';
+    type: 'extra' | 'side' | 'salary' | 'salary29';
   }) => void;
 }
 
@@ -396,7 +396,7 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({
 }) => {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
-  const [type, setType] = useState<'extra' | 'side' | 'salary'>('extra');
+  const [type, setType] = useState<'extra' | 'side' | 'salary' | 'salary29'>('extra');
 
   useEffect(() => {
     if (isOpen) {
@@ -408,11 +408,20 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isNameRequired = type === 'extra';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const numAmt = Number(amount) || 0;
-    if (!name.trim() || numAmt <= 0) return;
-    onSubmit({ name: name.trim(), amount: numAmt, type });
+    if (numAmt <= 0) return;
+    if (isNameRequired && !name.trim()) return;
+    const fallbackName =
+      type === 'salary'
+        ? 'เงินเดือนรอบวันที่ 14'
+        : type === 'salary29'
+        ? 'เงินเดือนรอบวันที่ 29'
+        : 'รายได้เสริม';
+    onSubmit({ name: name.trim() || fallbackName, amount: numAmt, type });
     onClose();
   };
 
@@ -440,17 +449,39 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <div>
             <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
-              ชื่อรายการรายรับ *
+              รูปแบบการบันทึก
             </label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น โบนัส, ขายของออนไลน์, ค่าล่วงเวลา"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
-            />
+            <select
+              value={type}
+              onChange={(e) =>
+                setType(
+                  e.target.value as 'extra' | 'side' | 'salary' | 'salary29'
+                )
+              }
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+            >
+              <option value="extra">เพิ่มเป็นรายการรายรับพิเศษในเดือนนี้</option>
+              <option value="salary">อัปเดตยอด "เงินเดือนรอบวันที่ 14" ของเดือนนี้</option>
+              <option value="salary29">อัปเดตยอด "เงินเดือนรอบวันที่ 29" ของเดือนนี้</option>
+              <option value="side">บวกเพิ่มเข้าช่อง "รายได้เสริม" ของเดือนนี้</option>
+            </select>
           </div>
+
+          {isNameRequired && (
+            <div>
+              <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
+                ชื่อรายการรายรับ *
+              </label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="เช่น โบนัส, ขายของออนไลน์, ค่าล่วงเวลา"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
@@ -466,23 +497,6 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({
               placeholder="0.00"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-[#006A63]"
             />
-          </div>
-
-          <div>
-            <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
-              รูปแบบการบันทึก
-            </label>
-            <select
-              value={type}
-              onChange={(e) =>
-                setType(e.target.value as 'extra' | 'side' | 'salary')
-              }
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
-            >
-              <option value="extra">เพิ่มเป็นรายการรายรับพิเศษในเดือนนี้</option>
-              <option value="side">บวกเพิ่มเข้าช่อง "รายได้เสริม" ของเดือนนี้</option>
-              <option value="salary">อัปเดตยอด "เงินเดือนหลัก" ของเดือนนี้</option>
-            </select>
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
@@ -599,10 +613,10 @@ export const AddMonthModal: React.FC<AddMonthModalProps> = ({
               />
               <span>
                 <strong className="font-heading block text-slate-800">
-                  คัดลอกยอดเงินเดือนและบิลประจำจากเดือนล่าสุด
+                  คัดลอกยอดเงินเดือน รายการหักประจำ และบิลประจำจากเดือนล่าสุด
                 </strong>
                 <span className="text-xs text-slate-500">
-                  ระบบจะยกยอดเงินเดือนและรายการค่าใช้จ่ายประจำมาให้โดยอัตโนมัติ (สถานะชำระจะเริ่มเป็นยังไม่จ่าย)
+                  ระบบจะยกยอดเงินเดือน ประกันสังคม กองทุนสำรองเลี้ยงชีพ และค่าใช้จ่ายประจำมาให้โดยอัตโนมัติ (สถานะชำระจะเริ่มเป็นยังไม่จ่าย)
                 </span>
               </span>
             </label>

@@ -100,12 +100,12 @@ export const DEFAULT_BUDGET_STATE: BudgetState = {
   activeTab: 'dashboard',
   targetPercentages: { ...DEFAULT_TARGET_PERCENTAGES },
   incomes: {
-    'พ.ย. 69': { salary: 21000, side: 0, extras: [] },
-    'ธ.ค. 69': { salary: 21000, side: 0, extras: [] },
-    'ม.ค. 70': { salary: 21000, side: 0, extras: [] },
-    'ก.พ. 70': { salary: 21000, side: 0, extras: [] },
-    'มี.ค. 70': { salary: 21000, side: 0, extras: [] },
-    'เม.ย. 70': { salary: 21000, side: 0, extras: [] },
+    'พ.ย. 69': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
+    'ธ.ค. 69': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
+    'ม.ค. 70': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
+    'ก.พ. 70': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
+    'มี.ค. 70': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
+    'เม.ย. 70': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
   },
   expenses: [
     {
@@ -406,17 +406,36 @@ export function fmtCompact(num: number): string {
 }
 
 export function getMonthIncome(state: BudgetState, month: string) {
-  const inc = state.incomes[month] || { salary: 0, side: 0, extras: [] };
+  const inc = state.incomes[month] || {
+    salary: 0,
+    salary29: 0,
+    side: 0,
+    extras: [],
+    socialSecurity: 0,
+    providentFund: 0,
+  };
   const extras = Array.isArray(inc.extras) ? inc.extras : [];
   const extrasTotal = extras.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const salary = Number(inc.salary) || 0;
+  const salary29 = Number(inc.salary29) || 0;
+  const salaryTotal = salary + salary29;
   const side = Number(inc.side) || 0;
+  const grossTotal = salaryTotal + side + extrasTotal;
+  const socialSecurity = Math.max(0, Number(inc.socialSecurity) || 0);
+  const providentFund = Math.max(0, Number(inc.providentFund) || 0);
+  const deductionsTotal = socialSecurity + providentFund;
   return {
     salary,
+    salary29,
+    salaryTotal,
     side,
     extras,
     extrasTotal,
-    total: salary + side + extrasTotal,
+    grossTotal,
+    socialSecurity,
+    providentFund,
+    deductionsTotal,
+    total: grossTotal - deductionsTotal,
   };
 }
 

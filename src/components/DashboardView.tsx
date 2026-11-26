@@ -382,7 +382,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-white rounded-xl p-5 border border-slate-200">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-heading font-medium text-slate-500">
-              รายรับรวม · {m}
+              {incData.deductionsTotal > 0 ? `รายรับสุทธิ · ${m}` : `รายรับรวม · ${m}`}
             </span>
             <button
               type="button"
@@ -395,9 +395,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-2xl sm:text-3xl font-num font-bold text-slate-900 mt-2">
             ฿{fmt(incData.total)}
           </div>
-          <div className="text-xs text-slate-500 mt-2 truncate">
-            เงินเดือน ฿{fmtCompact(incData.salary)} · เสริม/อื่นๆ ฿
-            {fmtCompact(incData.side + incData.extrasTotal)}
+          <div
+            className="text-xs text-slate-500 mt-2 truncate"
+            title={`รอบวันที่ 14: ฿${fmtCompact(incData.salary)} · รอบวันที่ 29: ฿${fmtCompact(incData.salary29)} · เสริม/อื่นๆ: ฿${fmtCompact(incData.side + incData.extrasTotal)} · ประกันสังคม: -฿${fmtCompact(incData.socialSecurity)} · กองทุนสำรองฯ: -฿${fmtCompact(incData.providentFund)}`}
+          >
+            {incData.salary29 > 0
+              ? `14: ฿${fmtCompact(incData.salary)} · 29: ฿${fmtCompact(incData.salary29)}`
+              : `เงินเดือน ฿${fmtCompact(incData.salary)}`}
+            {incData.deductionsTotal > 0
+              ? ` · หัก -฿${fmtCompact(incData.deductionsTotal)}`
+              : ` · เสริม/อื่นๆ ฿${fmtCompact(incData.side + incData.extrasTotal)}`}
           </div>
         </div>
 
