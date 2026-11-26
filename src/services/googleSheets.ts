@@ -96,6 +96,27 @@ export async function fetchSheetValues(
   return Array.isArray(data.values) ? data.values : [];
 }
 
+export async function findLatestBudgetSpreadsheet(
+  accessToken: string
+): Promise<{ id: string; name: string } | null> {
+  try {
+    const q = encodeURIComponent(
+      "mimeType='application/vnd.google-apps.spreadsheet' and name contains 'แผนการเงิน' and trashed=false"
+    );
+    const data = await googleFetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=1&fields=files(id,name)`,
+      accessToken
+    );
+    const first = Array.isArray(data.files) ? data.files[0] : null;
+    if (first?.id) {
+      return { id: first.id, name: first.name || 'แผนการเงิน' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const THAI_SHORT_MONTHS = [
   'ม.ค.',
   'ก.พ.',

@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   LogOut,
   Plus,
+  RefreshCw,
   RotateCcw,
   UploadCloud,
 } from 'lucide-react';
@@ -38,6 +39,7 @@ import {
   createBudgetTemplateSpreadsheet,
   fetchSheetValues,
   fetchSpreadsheetMeta,
+  findLatestBudgetSpreadsheet,
   openGooglePicker,
   parseGoogleSheetsToBudget,
   writeBudgetStateToTabs,
@@ -57,6 +59,27 @@ import {
 } from './components/BudgetModals';
 
 const SHEET_PREF_KEY = 'thai_budget_sheet_pref_v1';
+const DIRTY_FLAG_KEY = 'thai_budget_dirty_v1';
+
+function hasDirtyLocalEdits(): boolean {
+  try {
+    return localStorage.getItem(DIRTY_FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setDirtyLocalEdits(dirty: boolean) {
+  try {
+    if (dirty) {
+      localStorage.setItem(DIRTY_FLAG_KEY, '1');
+    } else {
+      localStorage.removeItem(DIRTY_FLAG_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 interface SavedSheetPref {
   spreadsheetId: string;
@@ -169,14 +192,20 @@ export default function App() {
   const lastSyncedSnapshotRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
-  // Save budget state locally
+  // Save budget state locally & mark dirty if edited after last sync
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       // ignore storage quota errors
     }
-  }, [state]);
+    if (
+      lastSyncedSnapshotRef.current !== null &&
+      lastSyncedSnapshotRef.current !== syncPayloadKey
+    ) {
+      setDirtyLocalEdits(true);
+    }
+  }, [state, syncPayloadKey]);
 
   // Save sheet connection preference (ID, title & tab name only, never tokens)
   useEffect(() => {
@@ -291,6 +320,7 @@ export default function App() {
                 targetPercentages: parsed.state.targetPercentages,
               });
               lastSyncedSnapshotRef.current = nextSnapshot;
+              setDirtyLocalEdits(false);
               setState(parsed.state);
               syncedAtValue = formatSyncTimestamp();
               bannerText = `อัปเดตข้อมูลจากไฟล์ "${meta.title}" (${parsed.rowCount} รายการ) แล้ว${
@@ -378,7 +408,7 @@ export default function App() {
   // Initialize Firebase Auth state listener
   useEffect(() => {
     const unsubscribe = initAuth(
-      (authedUser) => {
+      async (authedUser, token) => {
         setUser(authedUser);
         setNeedsAuth(false);
 
@@ -386,11 +416,21 @@ export default function App() {
           hasAutoReconnectedRef.current = true;
           const savedPref = loadSheetPref();
           if (savedPref?.spreadsheetId) {
-            connectToSpreadsheet(
+            await connectToSpreadsheet(
               savedPref.spreadsheetId,
               savedPref.selectedSheetTitle,
-              { autoRefreshOverride: savedPref.autoRefreshSec }
+              {
+                autoRefreshOverride: savedPref.autoRefreshSec,
+                pullFromSheet: !hasDirtyLocalEdits(),
+              }
             );
+          } else {
+            const discovered = await findLatestBudgetSpreadsheet(token);
+            if (discovered?.id) {
+              await connectToSpreadsheet(discovered.id, undefined, {
+                pullFromSheet: !hasDirtyLocalEdits(),
+              });
+            }
           }
         }
       },
@@ -419,7 +459,7 @@ export default function App() {
   useEffect(() => {
     if (!sheetConn || !(sheetConn.autoSave ?? true) || needsAuth) return;
     if (isSyncing || isConfirmLoading) return;
-    if (lastSyncedSnapshotRef.current === syncPayloadKey) return;
+    if (lastSyncedSnapshotRef.current === syncPayloadKey && !hasDirtyLocalEdits()) return;
 
     if (autoSaveTimerRef.current) {
       window.clearTimeout(autoSaveTimerRef.current);
@@ -450,6 +490,7 @@ export default function App() {
           sheetConn.sheets.map((s) => s.title)
         );
         lastSyncedSnapshotRef.current = snapshotToSave;
+        setDirtyLocalEdits(false);
         const nowTime = formatSyncTimestamp();
         setSheetConn((prev) =>
           prev
@@ -475,6 +516,7 @@ export default function App() {
                 sheetConn.sheets.map((s) => s.title)
               );
               lastSyncedSnapshotRef.current = syncPayloadKeyRef.current;
+              setDirtyLocalEdits(false);
               const nowTime = formatSyncTimestamp();
               setSheetConn((prev) =>
                 prev
@@ -517,15 +559,26 @@ export default function App() {
       setUser(result.user);
       setNeedsAuth(false);
 
-      // Reconnect saved Google Sheet preference automatically if available
+      // Reconnect saved Google Sheet preference automatically (or discover existing sheet on new device)
       const savedPref = loadSheetPref();
       if (savedPref?.spreadsheetId) {
         hasAutoReconnectedRef.current = true;
         await connectToSpreadsheet(
           savedPref.spreadsheetId,
           savedPref.selectedSheetTitle,
-          { autoRefreshOverride: savedPref.autoRefreshSec }
+          {
+            autoRefreshOverride: savedPref.autoRefreshSec,
+            pullFromSheet: !hasDirtyLocalEdits(),
+          }
         );
+      } else {
+        const discovered = await findLatestBudgetSpreadsheet(result.accessToken);
+        if (discovered?.id) {
+          hasAutoReconnectedRef.current = true;
+          await connectToSpreadsheet(discovered.id, undefined, {
+            pullFromSheet: !hasDirtyLocalEdits(),
+          });
+        }
       }
     } catch (err: any) {
       setSyncError(err?.message || 'เข้าสู่ระบบ Google ไม่สำเร็จ');
@@ -988,6 +1041,7 @@ export default function App() {
         const meta = await createBudgetTemplateSpreadsheet(token, state);
         const nowTime = formatSyncTimestamp();
         lastSyncedSnapshotRef.current = syncPayloadKeyRef.current;
+        setDirtyLocalEdits(false);
         setSheetConn({
           spreadsheetId: meta.spreadsheetId,
           spreadsheetTitle: meta.title,
@@ -1044,6 +1098,7 @@ export default function App() {
         );
 
         lastSyncedSnapshotRef.current = syncPayloadKeyRef.current;
+        setDirtyLocalEdits(false);
         const nowTime = formatSyncTimestamp();
         setSheetConn((prev) =>
           prev
@@ -1317,6 +1372,23 @@ export default function App() {
                       ? 'กำลังบันทึก...'
                       : 'บันทึกข้อมูลเข้า Google Sheet'}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    connectToSpreadsheet(
+                      sheetConn.spreadsheetId,
+                      sheetConn.selectedSheetTitle,
+                      { pullFromSheet: true }
+                    )
+                  }
+                  disabled={isSyncing || isAutoSaving}
+                  title="ดึงข้อมูลล่าสุดจาก Google Sheet มาอัปเดตในเครื่องนี้"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-heading font-medium text-slate-700 whitespace-nowrap transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>ดึงข้อมูลล่าสุด</span>
                 </button>
 
                 <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-heading text-slate-700 cursor-pointer whitespace-nowrap">
