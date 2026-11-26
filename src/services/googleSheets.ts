@@ -828,8 +828,10 @@ export async function writeBudgetStateToTabs(
       const extraSum = (inc.extras || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
       const sso = Math.max(0, Number(inc.socialSecurity) || 0);
       const pvd = Math.max(0, Number(inc.providentFund) || 0);
-      const net14 = sal14 - sso;
-      const net29 = sal29 - pvd;
+      const effectiveSso = sal14 > 0 ? Math.min(sal14, sso) : 0;
+      const effectivePvd = sal29 > 0 ? Math.min(sal29, pvd) : 0;
+      const net14 = sal14 - effectiveSso;
+      const net29 = sal29 - effectivePvd;
       const netInc = net14 + net29 + side + extraSum;
       return [m, sal14, sso, net14, sal29, pvd, net29, side, extraSum, netInc];
     });

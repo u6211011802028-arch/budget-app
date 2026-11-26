@@ -109,12 +109,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             />
             {incData.socialSecurity > 0 && (
               <div className="mt-1.5 flex items-center justify-between text-[11px] font-num">
-                <span className="text-slate-500 font-heading">
-                  หลังหัก ปกส. (-฿{fmt(incData.socialSecurity)})
-                </span>
-                <span className="font-semibold text-[#006A63]">
-                  สุทธิ ฿{fmt(incData.salaryNet14)}
-                </span>
+                {incData.salary > 0 ? (
+                  <>
+                    <span className="text-slate-500 font-heading">
+                      หลังหัก ปกส. (-฿{fmt(incData.effectiveSocialSecurity)})
+                    </span>
+                    <span className="font-semibold text-[#006A63]">
+                      สุทธิ ฿{fmt(incData.salaryNet14)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-amber-700 font-heading">
+                    รอเงินเดือนรอบ 14 เข้าก่อนหัก (ตั้งไว้ ฿{fmt(incData.socialSecurity)})
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -142,12 +150,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             />
             {incData.providentFund > 0 && (
               <div className="mt-1.5 flex items-center justify-between text-[11px] font-num">
-                <span className="text-slate-500 font-heading">
-                  หลังหัก PVD (-฿{fmt(incData.providentFund)})
-                </span>
-                <span className="font-semibold text-[#006A63]">
-                  สุทธิ ฿{fmt(incData.salaryNet29)}
-                </span>
+                {incData.salary29 > 0 ? (
+                  <>
+                    <span className="text-slate-500 font-heading">
+                      หลังหัก PVD (-฿{fmt(incData.effectiveProvidentFund)})
+                    </span>
+                    <span className="font-semibold text-[#006A63]">
+                      สุทธิ ฿{fmt(incData.salaryNet29)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-amber-700 font-heading">
+                    รอเงินเดือนรอบ 29 เข้า (ยังไม่หัก ฿{fmt(incData.providentFund)} จากรอบ 14)
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -247,8 +263,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             </span>
             {(incData.deductionsTotal > 0 || incData.salary29 > 0) && (
               <span className="text-[11px] font-num text-[#004D48]/85 mt-0.5">
-                รอบ 14 สุทธิ ฿{fmt(incData.salaryNet14)} · รอบ 29 สุทธิ ฿
-                {fmt(incData.salaryNet29)}
+                {incData.salary29 > 0
+                  ? `รอบ 14 สุทธิ ฿${fmt(incData.salaryNet14)} · รอบ 29 สุทธิ ฿${fmt(incData.salaryNet29)}`
+                  : incData.providentFund > 0
+                  ? `รอบ 14 สุทธิ ฿${fmt(incData.salaryNet14)} · รอเงินรอบ 29 เข้าก่อนหัก PVD`
+                  : `รอบ 14 สุทธิ ฿${fmt(incData.salaryNet14)}`}
               </span>
             )}
           </div>
