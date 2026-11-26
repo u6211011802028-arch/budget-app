@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { BudgetCategory } from '../types/budget';
+import { BudgetCategory, EssentialSubcategory } from '../types/budget';
 import {
+  ESSENTIAL_SUBCATEGORIES,
   EXPENSE_CATEGORY_OPTIONS,
   buildFutureMonthSequence,
+  detectEssentialSubcategory,
   fmt,
+  resolveEssentialSubcategory,
 } from '../data/defaultBudget';
 
 interface AddExpenseModalProps {
@@ -17,6 +20,7 @@ interface AddExpenseModalProps {
     amount: number;
     note: string;
     category: BudgetCategory;
+    subCategory?: EssentialSubcategory;
     recurring: boolean;
     recurringEndMonth: string;
     recurringMonths: number;
@@ -35,6 +39,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<BudgetCategory>('ค่าใช้จ่ายจำเป็น (40%)');
+  const [subCategory, setSubCategory] = useState<EssentialSubcategory>('จำเป็นอื่นๆ');
+  const [categoryManual, setCategoryManual] = useState(false);
+  const [subCategoryManual, setSubCategoryManual] = useState(false);
   const [recurring, setRecurring] = useState(false);
   const [recurringMode, setRecurringMode] = useState<'fixed' | 'split'>('fixed');
   const [durationMonths, setDurationMonths] = useState('');
@@ -59,6 +66,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setAmount('');
       setNote('');
       setCategory('ค่าใช้จ่ายจำเป็น (40%)');
+      setSubCategory('จำเป็นอื่นๆ');
+      setCategoryManual(false);
+      setSubCategoryManual(false);
       setRecurring(false);
       setRecurringMode('fixed');
       setDurationMonths('');
@@ -136,12 +146,28 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       amount: effectiveMonthlyAmount,
       note: note.trim() || '-',
       category,
+      subCategory:
+        category === 'ค่าใช้จ่ายจำเป็น (40%)' ? subCategory : undefined,
       recurring,
       recurringEndMonth: finalEndMonth,
       recurringMonths: recurring ? effectiveMonths : 1,
       paid,
     });
     onClose();
+  };
+
+  const handleNameChange = (nextName: string) => {
+    setName(nextName);
+    const detected = detectEssentialSubcategory(nextName);
+    if (!subCategoryManual) {
+      setSubCategory(detected);
+    }
+    if (
+      !categoryManual &&
+      (detected === 'ค่าอาหาร / น้ำ / ขนม' || detected === 'ค่าน้ำมัน')
+    ) {
+      setCategory('ค่าใช้จ่ายจำเป็น (40%)');
+    }
   };
 
   return (
@@ -174,8 +200,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               type="text"
               required
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น ค่าอาหารกลางวัน, ผ่อนมือถือ 0%, ค่าเน็ต"
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="เช่น ค่าอาหารกลางวัน, กาแฟ, ขนม, ค่าน้ำมัน, ค่าเน็ต"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
             />
           </div>
@@ -218,7 +244,14 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as BudgetCategory)}
+              onChange={(e) => {
+                const nextCat = e.target.value as BudgetCategory;
+                setCategory(nextCat);
+                setCategoryManual(true);
+                if (nextCat === 'ค่าใช้จ่ายจำเป็น (40%)' && !subCategoryManual) {
+                  setSubCategory(detectEssentialSubcategory(name));
+                }
+              }}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
             >
               {EXPENSE_CATEGORY_OPTIONS.map((c) => (
@@ -228,6 +261,39 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               ))}
             </select>
           </div>
+
+          {category === 'ค่าใช้จ่ายจำเป็น (40%)' && (
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label
+                  htmlFor="add-expense-subcategory"
+                  className="block text-xs font-heading font-medium text-slate-600"
+                >
+                  หมวดย่อยในค่าใช้จ่ายจำเป็น
+                </label>
+                {name.trim() && !subCategoryManual && (
+                  <span className="text-[11px] font-heading text-[#006A63]">
+                    กรองจากชื่อรายการอัตโนมัติ
+                  </span>
+                )}
+              </div>
+              <select
+                id="add-expense-subcategory"
+                value={subCategory}
+                onChange={(e) => {
+                  setSubCategory(e.target.value as EssentialSubcategory);
+                  setSubCategoryManual(true);
+                }}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+              >
+                {ESSENTIAL_SUBCATEGORIES.map((sc) => (
+                  <option key={sc.key} value={sc.key}>
+                    {sc.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer pt-1">
             <input
@@ -653,6 +719,7 @@ interface EditExpenseModalProps {
     amount: number;
     note: string;
     category: BudgetCategory;
+    subCategory?: EssentialSubcategory;
     isPaid: boolean;
     recurringEndMonth?: string;
   } | null;
@@ -663,6 +730,7 @@ interface EditExpenseModalProps {
     amount: number;
     note: string;
     category: BudgetCategory;
+    subCategory?: EssentialSubcategory;
     paid: boolean;
     applyFutureMonths: boolean;
     recurringEndMonth: string;
@@ -682,6 +750,8 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<BudgetCategory>('ค่าใช้จ่ายจำเป็น (40%)');
+  const [subCategory, setSubCategory] = useState<EssentialSubcategory>('จำเป็นอื่นๆ');
+  const [subCategoryManual, setSubCategoryManual] = useState(false);
   const [paid, setPaid] = useState(false);
   const [applyFutureMonths, setApplyFutureMonths] = useState(false);
   const [recurringMode, setRecurringMode] = useState<'fixed' | 'split'>('fixed');
@@ -713,6 +783,14 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
           ? 'เงินใช้ส่วนตัว (10%)'
           : expense.category;
       setCategory(normalizedCat);
+      setSubCategory(
+        resolveEssentialSubcategory({
+          name: expense.name,
+          category: normalizedCat,
+          subCategory: expense.subCategory,
+        }) || detectEssentialSubcategory(expense.name)
+      );
+      setSubCategoryManual(!!expense.subCategory);
       setPaid(expense.isPaid);
       setApplyFutureMonths(false);
       setRecurringMode('fixed');
@@ -799,6 +877,8 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       amount: effectiveMonthlyAmount,
       note: note.trim() || '-',
       category,
+      subCategory:
+        category === 'ค่าใช้จ่ายจำเป็น (40%)' ? subCategory : undefined,
       paid,
       applyFutureMonths,
       recurringEndMonth: finalEndMonth,
@@ -837,7 +917,13 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
               type="text"
               required
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const nextName = e.target.value;
+                setName(nextName);
+                if (!subCategoryManual) {
+                  setSubCategory(detectEssentialSubcategory(nextName));
+                }
+              }}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#006A63]"
             />
           </div>
@@ -879,7 +965,13 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as BudgetCategory)}
+              onChange={(e) => {
+                const nextCat = e.target.value as BudgetCategory;
+                setCategory(nextCat);
+                if (nextCat === 'ค่าใช้จ่ายจำเป็น (40%)' && !subCategoryManual) {
+                  setSubCategory(detectEssentialSubcategory(name));
+                }
+              }}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
             >
               {EXPENSE_CATEGORY_OPTIONS.map((c) => (
@@ -889,6 +981,32 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
               ))}
             </select>
           </div>
+
+          {category === 'ค่าใช้จ่ายจำเป็น (40%)' && (
+            <div>
+              <label
+                htmlFor="edit-expense-subcategory"
+                className="block text-xs font-heading font-medium text-slate-600 mb-1"
+              >
+                หมวดย่อยในค่าใช้จ่ายจำเป็น
+              </label>
+              <select
+                id="edit-expense-subcategory"
+                value={subCategory}
+                onChange={(e) => {
+                  setSubCategory(e.target.value as EssentialSubcategory);
+                  setSubCategoryManual(true);
+                }}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+              >
+                {ESSENTIAL_SUBCATEGORIES.map((sc) => (
+                  <option key={sc.key} value={sc.key}>
+                    {sc.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer pt-1">
             <input

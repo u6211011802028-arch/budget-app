@@ -1,12 +1,16 @@
 import {
   BudgetCategory,
   BudgetState,
+  EssentialSubcategory,
   ExpenseItem,
   ExtraIncomeItem,
   MonthIncome,
   SheetTabInfo,
 } from '../types/budget';
-import { BUDGET_CATEGORIES } from '../data/defaultBudget';
+import {
+  BUDGET_CATEGORIES,
+  resolveEssentialSubcategory,
+} from '../data/defaultBudget';
 
 export class AuthExpiredError extends Error {
   constructor(message = 'สิทธิ์การใช้งาน Google หมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้ง') {
@@ -351,7 +355,11 @@ function parseMatrixFormat(
     ['หมายเหตุ', 'ครบกำหนด', 'note', 'due'].some((k) => h.includes(k))
   );
   const catCol = lowerHeaders.findIndex((h) =>
-    ['หมวด', 'category', 'กลุ่ม'].some((k) => h.includes(k))
+    ['หมวดหมู่', 'category', 'กลุ่ม'].some((k) => h.includes(k)) ||
+    (h.includes('หมวด') && !h.includes('ย่อย'))
+  );
+  const subCatCol = lowerHeaders.findIndex((h) =>
+    h.includes('หมวดย่อย') || h.includes('subcategory')
   );
   const typeCol = lowerHeaders.findIndex((h) =>
     ['ประเภท', 'type'].some((k) => h.includes(k))
@@ -503,7 +511,14 @@ function parseMatrixFormat(
 
     const note = noteCol >= 0 ? String(row[noteCol] || '-').trim() || '-' : '-';
     const rawCat = catCol >= 0 ? String(row[catCol] || '').trim() : '';
+    const rawSub = subCatCol >= 0 ? String(row[subCatCol] || '').trim() : '';
     const category = mapCategory(rawCat, itemName);
+    const parsedSub: EssentialSubcategory | undefined =
+      category === 'ค่าใช้จ่ายจำเป็น (40%)'
+        ? rawSub === 'ค่าอาหาร / น้ำ / ขนม' || rawSub === 'ค่าน้ำมัน' || rawSub === 'จำเป็นอื่นๆ'
+          ? rawSub
+          : resolveEssentialSubcategory({ name: itemName, category }) || undefined
+        : undefined;
 
     const amounts: Record<string, number> = {};
     const paid: Record<string, boolean> = {};
@@ -529,6 +544,7 @@ function parseMatrixFormat(
       name: itemName,
       note,
       category,
+      subCategory: parsedSub,
       amounts,
       paid,
     });
@@ -780,11 +796,12 @@ export async function writeBudgetStateToTabs(
     }
   }
 
-  const expenseHeaders = ['รายการ', 'หมายเหตุ', 'หมวดหมู่', ...state.months];
+  const expenseHeaders = ['รายการ', 'หมายเหตุ', 'หมวดหมู่', 'หมวดย่อย', ...state.months];
   const expenseRows = state.expenses.map((exp) => [
     exp.name,
     exp.note || '-',
     exp.category,
+    resolveEssentialSubcategory(exp) || '-',
     ...state.months.map((m) => Number(exp.amounts[m]) || 0),
   ]);
 

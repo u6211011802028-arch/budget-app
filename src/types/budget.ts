@@ -21,11 +21,17 @@ export interface MonthIncome {
   providentFund?: number;
 }
 
+export type EssentialSubcategory =
+  | 'ค่าอาหาร / น้ำ / ขนม'
+  | 'ค่าน้ำมัน'
+  | 'จำเป็นอื่นๆ';
+
 export interface ExpenseItem {
   id: number;
   name: string;
   note: string;
   category: BudgetCategory;
+  subCategory?: EssentialSubcategory;
   amounts: Record<string, number>;
   paid: Record<string, boolean>;
   recurringEndMonth?: string;

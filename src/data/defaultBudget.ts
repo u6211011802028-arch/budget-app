@@ -2,6 +2,8 @@ import {
   BudgetCategory,
   BudgetState,
   DebtPriorityItem,
+  EssentialSubcategory,
+  ExpenseItem,
   MonthExpenseView,
   TargetPercentages,
 } from '../types/budget';
@@ -93,6 +95,187 @@ export const EXPENSE_CATEGORY_OPTIONS: {
   { name: 'เงินออม + ลงทุน (20%)', label: 'เงินออม + ลงทุน (20%)' },
   { name: 'เงินใช้ส่วนตัว (10%)', label: 'เงินใช้ส่วนตัว (10%)' },
 ];
+
+export const ESSENTIAL_SUBCATEGORIES: {
+  key: EssentialSubcategory;
+  label: string;
+  shortLabel: string;
+  color: string;
+}[] = [
+  {
+    key: 'ค่าอาหาร / น้ำ / ขนม',
+    label: 'ค่าอาหาร / น้ำ / ขนม',
+    shortLabel: 'อาหาร/น้ำ/ขนม',
+    color: '#059669',
+  },
+  {
+    key: 'ค่าน้ำมัน',
+    label: 'ค่าน้ำมัน',
+    shortLabel: 'ค่าน้ำมัน',
+    color: '#0891B2',
+  },
+  {
+    key: 'จำเป็นอื่นๆ',
+    label: 'จำเป็นอื่นๆ (น้ำ/ไฟ/เน็ต ฯลฯ)',
+    shortLabel: 'จำเป็นอื่นๆ',
+    color: '#64748B',
+  },
+];
+
+export function detectEssentialSubcategory(itemName: string): EssentialSubcategory {
+  const n = String(itemName || '').trim().toLowerCase();
+  if (!n) return 'จำเป็นอื่นๆ';
+
+  // Utility water bills / plumbing repairs stay in จำเป็นอื่นๆ
+  const isUtilityWater =
+    n.includes('ค่าน้ำบ้าน') ||
+    n.includes('ค่าน้ำประปา') ||
+    n.includes('น้ำประปา') ||
+    n.includes('ก๊อกน้ำ') ||
+    n.includes('ท่อน้ำ') ||
+    n.includes('ประปา') ||
+    n.includes('ปั๊มน้ำ') ||
+    n.includes('แทงค์น้ำ') ||
+    (n.startsWith('ค่าน้ำ') &&
+      !n.includes('น้ำมัน') &&
+      !n.includes('น้ำดื่ม') &&
+      !n.includes('น้ำปั่น') &&
+      !n.includes('น้ำอัดลม') &&
+      !n.includes('น้ำหวาน'));
+
+  if (isUtilityWater) {
+    return 'จำเป็นอื่นๆ';
+  }
+
+  // Cooking oils belong to food/groceries rather than fuel
+  const isCookingOil =
+    n.includes('น้ำมันพืช') ||
+    n.includes('น้ำมันปาล์ม') ||
+    n.includes('น้ำมันถั่ว') ||
+    n.includes('น้ำมันรำข้าว') ||
+    n.includes('น้ำมันหอย') ||
+    n.includes('น้ำมันงา') ||
+    n.includes('น้ำมันมะกอก') ||
+    n.includes('น้ำมันหมู');
+
+  if (isCookingOil) {
+    return 'ค่าอาหาร / น้ำ / ขนม';
+  }
+
+  const fuelKeywords = [
+    'น้ำมัน',
+    'ดีเซล',
+    'เบนซิน',
+    'แก๊สโซฮอล์',
+    'gasohol',
+    'fuel',
+    'petrol',
+    'gasoline',
+    'ปตท',
+    'ptt',
+    'บางจาก',
+    'bangchak',
+    'caltex',
+    'esso',
+    'shell',
+    'ปั๊ม',
+  ];
+  if (fuelKeywords.some((kw) => n.includes(kw))) {
+    return 'ค่าน้ำมัน';
+  }
+
+  const foodKeywords = [
+    'อาหาร',
+    'ข้าว',
+    'กับข้าว',
+    'กิน',
+    'มื้อ',
+    'ก๋วยเตี๋ยว',
+    'บะหมี่',
+    'ราเมง',
+    'ส้มตำ',
+    'ชาบู',
+    'หมูกระทะ',
+    'บุฟเฟ่ต์',
+    'สุกี้',
+    'พิซซ่า',
+    'เบอร์เกอร์',
+    'ไก่ทอด',
+    'กาแฟ',
+    'คาเฟ่',
+    'ชาไทย',
+    'ชาเขียว',
+    'ชานม',
+    'ชาไข่มุก',
+    'ชาเย็น',
+    'ชามะนาว',
+    'น้ำชา',
+    'โกโก้',
+    'มัทฉะ',
+    'น้ำดื่ม',
+    'น้ำเปล่า',
+    'น้ำแข็ง',
+    'น้ำหวาน',
+    'น้ำอัดลม',
+    'น้ำผลไม้',
+    'น้ำปั่น',
+    'น้ำเย็น',
+    'น้ำขวด',
+    'น้ำแร่',
+    'ซื้อน้ำ',
+    'เครื่องดื่ม',
+    'นม',
+    'ขนม',
+    'เบเกอรี่',
+    'ขนมปัง',
+    'เค้ก',
+    'ไอติม',
+    'ไอศกรีม',
+    'ของหวาน',
+    'ของว่าง',
+    'ผลไม้',
+    'มาม่า',
+    'เซเว่น',
+    '7-11',
+    '7-eleven',
+    'grabfood',
+    'lineman',
+    'foodpanda',
+    'shopeefood',
+    'food',
+    'drink',
+    'snack',
+    'coffee',
+    'cafe',
+    'tea',
+    'lunch',
+    'dinner',
+    'breakfast',
+    'meal',
+    'market',
+    'ตลาด',
+    'ของกิน',
+    'ซุปเปอร์',
+  ];
+  if (
+    n === 'น้ำ' ||
+    n === 'ชา' ||
+    /(\s|^)น้ำ(\s|$|\d)/.test(n) ||
+    foodKeywords.some((kw) => n.includes(kw))
+  ) {
+    return 'ค่าอาหาร / น้ำ / ขนม';
+  }
+
+  return 'จำเป็นอื่นๆ';
+}
+
+export function resolveEssentialSubcategory(
+  item: Pick<ExpenseItem, 'name' | 'category' | 'subCategory'>
+): EssentialSubcategory | null {
+  if (item.category !== 'ค่าใช้จ่ายจำเป็น (40%)') return null;
+  if (item.subCategory) return item.subCategory;
+  return detectEssentialSubcategory(item.name);
+}
 
 export const DEFAULT_BUDGET_STATE: BudgetState = {
   months: ['พ.ย. 69', 'ธ.ค. 69', 'ม.ค. 70', 'ก.พ. 70', 'มี.ค. 70', 'เม.ย. 70'],

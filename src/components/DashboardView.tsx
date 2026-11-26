@@ -30,11 +30,13 @@ import { BudgetState, TargetPercentages } from '../types/budget';
 import {
   BUDGET_CATEGORIES,
   DEFAULT_TARGET_PERCENTAGES,
+  ESSENTIAL_SUBCATEGORIES,
   RECOVERY_ROADMAP,
   fmt,
   fmtCompact,
   getMonthExpenses,
   getMonthIncome,
+  resolveEssentialSubcategory,
   resolveTargetPercentages,
 } from '../data/defaultBudget';
 
@@ -57,6 +59,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [proportionBasis, setProportionBasis] = useState<'income' | 'expense'>('income');
   const [isEditingPct, setIsEditingPct] = useState(false);
+  const [donutMode, setDonutMode] = useState<'nested' | 'main'>('nested');
 
   const targets = useMemo(
     () => resolveTargetPercentages(state.targetPercentages),
@@ -330,25 +333,93 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [exps, incData.total, targets]);
 
-  const pieData = useMemo(() => {
+  const essentialSubBreakdown = useMemo(() => {
+    const essentialExps = exps.filter((e) => e.category === 'ค่าใช้จ่ายจำเป็น (40%)');
+    const essentialTotal = essentialExps.reduce((s, e) => s + e.amount, 0);
+    const items = ESSENTIAL_SUBCATEGORIES.map((sc) => {
+      const amount = essentialExps
+        .filter((e) => resolveEssentialSubcategory(e) === sc.key)
+        .reduce((s, e) => s + e.amount, 0);
+      return {
+        ...sc,
+        amount: Number(amount.toFixed(2)),
+        shareOfEssential: essentialTotal > 0 ? (amount / essentialTotal) * 100 : 0,
+        shareOfTotal: totalExpense > 0 ? (amount / totalExpense) * 100 : 0,
+        shareOfIncome: incData.total > 0 ? (amount / incData.total) * 100 : 0,
+      };
+    });
+    return { essentialTotal, items };
+  }, [exps, totalExpense, incData.total]);
+
+  const innerPieData = useMemo(() => {
     return categoryBreakdown
       .filter((c) => c.actual > 0)
       .map((c) => ({
+        key: c.key,
         name: c.shortName,
         fullName: c.name,
         value: c.actual,
         color: c.color,
         sharePct: totalExpense > 0 ? (c.actual / totalExpense) * 100 : 0,
+        isSubcategory: false,
+        essentialSharePct: 0,
       }));
   }, [categoryBreakdown, totalExpense]);
 
+  const outerEssentialPieData = useMemo(() => {
+    return essentialSubBreakdown.items
+      .filter((s) => s.amount > 0)
+      .map((s) => ({
+        key: s.key,
+        name: s.shortLabel,
+        fullName: `ค่าใช้จ่ายจำเป็น · ${s.key}`,
+        value: s.amount,
+        color: s.color,
+        sharePct: s.shareOfTotal,
+        isSubcategory: true,
+        essentialSharePct: s.shareOfEssential,
+      }));
+  }, [essentialSubBreakdown]);
+
+  const essentialArcEndAngle = useMemo(() => {
+    if (totalExpense <= 0 || essentialSubBreakdown.essentialTotal <= 0) return 90;
+    const sweep = (essentialSubBreakdown.essentialTotal / totalExpense) * 360;
+    return 90 - Math.min(360, sweep);
+  }, [totalExpense, essentialSubBreakdown.essentialTotal]);
+
   const targetVsActualData = useMemo(() => {
-    return categoryBreakdown.map((c) => ({
-      name: c.shortName,
-      งบเป้าหมาย: c.targetAmt,
-      ใช้จริง: c.actual,
-    }));
-  }, [categoryBreakdown]);
+    const foodAmt =
+      essentialSubBreakdown.items.find((s) => s.key === 'ค่าอาหาร / น้ำ / ขนม')?.amount || 0;
+    const fuelAmt =
+      essentialSubBreakdown.items.find((s) => s.key === 'ค่าน้ำมัน')?.amount || 0;
+    const otherEssAmt =
+      essentialSubBreakdown.items.find((s) => s.key === 'จำเป็นอื่นๆ')?.amount || 0;
+
+    return categoryBreakdown.map((c) => {
+      if (c.key === 'essential') {
+        return {
+          name: c.shortName,
+          categoryKey: c.key,
+          งบเป้าหมาย: c.targetAmt,
+          'ค่าอาหาร / น้ำ / ขนม': foodAmt,
+          ค่าน้ำมัน: fuelAmt,
+          จำเป็นอื่นๆ: otherEssAmt,
+          ใช้จริงหมวดอื่น: 0,
+          รวมใช้จริง: c.actual,
+        };
+      }
+      return {
+        name: c.shortName,
+        categoryKey: c.key,
+        งบเป้าหมาย: c.targetAmt,
+        'ค่าอาหาร / น้ำ / ขนม': 0,
+        ค่าน้ำมัน: 0,
+        จำเป็นอื่นๆ: 0,
+        ใช้จริงหมวดอื่น: c.actual,
+        รวมใช้จริง: c.actual,
+      };
+    });
+  }, [categoryBreakdown, essentialSubBreakdown]);
 
   const statusStyles = {
     'on-target': {
@@ -786,18 +857,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Donut Chart: Active Month 40-30-20-10 Allocation */}
+        {/* Donut Chart: Active Month 40-30-20-10 Allocation with Nested Essential Subcategories */}
         <div className="lg:col-span-5 bg-white rounded-xl p-5 sm:p-6 border border-slate-200 flex flex-col">
-          <div>
-            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
-              สัดส่วนค่าใช้จ่ายรายหมวดหมู่ · {m}
-            </h2>
-            <p className="text-xs text-slate-500">
-              แสดงสัดส่วนการใช้จ่ายจริงแยกตามกลุ่ม {formulaLabel}
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+                สัดส่วนค่าใช้จ่ายรายหมวดหมู่ · {m}
+              </h2>
+              <p className="text-xs text-slate-500">
+                วงใน 4 หมวดหลัก {formulaLabel} · วงนอกแยกย่อยในค่าใช้จ่ายจำเป็น
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setDonutMode('nested')}
+                className={`px-2.5 py-1 text-[11px] font-heading font-medium rounded-md whitespace-nowrap transition ${
+                  donutMode === 'nested'
+                    ? 'bg-white text-[#006A63] shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ซ้อนหมวดย่อย
+              </button>
+              <button
+                type="button"
+                onClick={() => setDonutMode('main')}
+                className={`px-2.5 py-1 text-[11px] font-heading font-medium rounded-md whitespace-nowrap transition ${
+                  donutMode === 'main'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                4 หมวดหลัก
+              </button>
+            </div>
           </div>
 
-          {pieData.length === 0 ? (
+          {innerPieData.length === 0 ? (
             <div className="flex-1 flex items-center justify-center py-12 text-sm text-slate-400">
               ยังไม่มีรายการรายจ่ายในเดือน {m}
             </div>
@@ -807,24 +904,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={pieData}
+                      data={innerPieData}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      innerRadius={56}
-                      outerRadius={82}
-                      paddingAngle={2}
+                      startAngle={90}
+                      endAngle={-270}
+                      innerRadius={donutMode === 'nested' ? 44 : 52}
+                      outerRadius={donutMode === 'nested' ? 63 : 76}
+                      paddingAngle={0}
+                      stroke="#ffffff"
+                      strokeWidth={2}
                     >
-                      {pieData.map((entry, idx) => (
+                      {innerPieData.map((entry, idx) => (
                         <Cell key={idx} fill={entry.color} />
                       ))}
                     </Pie>
+                    {donutMode === 'nested' && outerEssentialPieData.length > 0 && (
+                      <Pie
+                        data={outerEssentialPieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        startAngle={90}
+                        endAngle={essentialArcEndAngle}
+                        innerRadius={67}
+                        outerRadius={84}
+                        paddingAngle={0}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      >
+                        {outerEssentialPieData.map((entry, idx) => (
+                          <Cell key={`sub-${idx}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                    )}
                     <Tooltip
-                      formatter={(value: any, _name: any, props: any) => [
-                        `฿${fmt(Number(value) || 0)} (${props?.payload?.sharePct?.toFixed(1) || 0}%)`,
-                        props?.payload?.fullName || '',
-                      ]}
+                      formatter={(value: any, _name: any, props: any) => {
+                        const p = props?.payload;
+                        const subText = p?.isSubcategory
+                          ? ` · ${p.essentialSharePct?.toFixed(1) || 0}% ของหมวดจำเป็น`
+                          : '';
+                        return [
+                          `฿${fmt(Number(value) || 0)} (${p?.sharePct?.toFixed(1) || 0}% ของรายจ่าย${subText})`,
+                          p?.fullName || '',
+                        ];
+                      }}
                       contentStyle={{
                         borderRadius: '10px',
                         border: '1px solid #E2E8F0',
@@ -843,21 +970,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-3 border-t border-slate-100 text-xs">
-                {categoryBreakdown.map((cat) => (
-                  <div key={cat.name} className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-sm shrink-0"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                      <span className="text-slate-600 truncate">{cat.shortName}</span>
+              <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs">
+                {categoryBreakdown.map((cat) => {
+                  const shareOfExpense =
+                    totalExpense > 0 ? (cat.actual / totalExpense) * 100 : 0;
+                  return (
+                    <div key={cat.name} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="w-2.5 h-2.5 rounded-sm shrink-0"
+                            style={{ backgroundColor: cat.color }}
+                          />
+                          <span className="font-heading font-semibold text-slate-800 truncate">
+                            {cat.name}
+                          </span>
+                        </div>
+                        <span className="font-num font-semibold text-slate-900 shrink-0">
+                          ฿{fmt(cat.actual)}{' '}
+                          <span className="text-slate-400 font-normal">
+                            ({shareOfExpense.toFixed(0)}%)
+                          </span>
+                        </span>
+                      </div>
+
+                      {cat.key === 'essential' && (
+                        <div className="ml-3 pl-3 border-l-2 border-[#006A63]/25 space-y-1.5">
+                          {essentialSubBreakdown.items.map((sub) => (
+                            <div key={sub.key} className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px] gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span
+                                    className="w-2 h-2 rounded-xs shrink-0"
+                                    style={{ backgroundColor: sub.color }}
+                                  />
+                                  <span className="text-slate-600 truncate">
+                                    {sub.key}
+                                  </span>
+                                </div>
+                                <span className="font-num text-slate-700 shrink-0">
+                                  ฿{fmt(sub.amount)}{' '}
+                                  <span className="text-slate-400">
+                                    ({sub.shareOfEssential.toFixed(0)}% ของจำเป็น)
+                                  </span>
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{
+                                    width: `${Math.min(100, sub.shareOfEssential)}%`,
+                                    backgroundColor: sub.color,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <span className="font-num font-semibold text-slate-800 shrink-0">
-                      {cat.actualPct.toFixed(0)}%
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -877,7 +1050,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
 
-          <div className="h-52 w-full">
+          <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={targetVsActualData}
@@ -898,17 +1071,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   width={52}
                 />
                 <Tooltip
-                  formatter={(value: any, name: any) => [
-                    `฿${fmt(Number(value) || 0)}`,
-                    String(name),
-                  ]}
-                  contentStyle={{
-                    borderRadius: '10px',
-                    border: '1px solid #E2E8F0',
-                    fontSize: '12px',
+                  content={({ active, payload, label }: any) => {
+                    if (!active || !payload?.length) return null;
+                    const row = payload[0]?.payload;
+                    const nonZeroItems = payload.filter(
+                      (item: any) =>
+                        item.dataKey === 'งบเป้าหมาย' || Number(item.value) > 0
+                    );
+                    return (
+                      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-md text-xs space-y-1">
+                        <div className="font-heading font-semibold text-slate-800">
+                          {label}
+                        </div>
+                        {nonZeroItems.map((entry: any) => (
+                          <div
+                            key={entry.dataKey}
+                            className="flex items-center justify-between gap-4"
+                          >
+                            <span className="flex items-center gap-1.5 text-slate-600">
+                              <span
+                                className="w-2 h-2 rounded-xs shrink-0"
+                                style={{ backgroundColor: entry.color }}
+                              />
+                              {entry.dataKey === 'ใช้จริงหมวดอื่น'
+                                ? 'ใช้จริง'
+                                : entry.name}
+                            </span>
+                            <span className="font-num font-semibold text-slate-900">
+                              ฿{fmt(Number(entry.value) || 0)}
+                            </span>
+                          </div>
+                        ))}
+                        {row?.categoryKey === 'essential' && (
+                          <div className="pt-1 border-t border-slate-100 flex items-center justify-between gap-4 font-semibold text-[#006A63]">
+                            <span>รวมใช้จริง</span>
+                            <span className="font-num">
+                              ฿{fmt(Number(row.รวมใช้จริง) || 0)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
                   }}
                 />
-                <Legend wrapperStyle={{ fontSize: '12px', fontFamily: 'Prompt' }} />
+                <Legend wrapperStyle={{ fontSize: '11px', fontFamily: 'Prompt' }} />
                 <Bar
                   dataKey="งบเป้าหมาย"
                   fill="#CBD5E1"
@@ -916,7 +1122,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   maxBarSize={28}
                 />
                 <Bar
-                  dataKey="ใช้จริง"
+                  dataKey="ค่าอาหาร / น้ำ / ขนม"
+                  stackId="actual"
+                  fill="#059669"
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="ค่าน้ำมัน"
+                  stackId="actual"
+                  fill="#0891B2"
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="จำเป็นอื่นๆ"
+                  stackId="actual"
+                  fill="#64748B"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="ใช้จริงหมวดอื่น"
+                  name="ใช้จริง (หมวดอื่น)"
+                  stackId="actual"
                   fill="#006A63"
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
@@ -940,24 +1167,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 : 'bg-orange-600';
 
               return (
-                <div key={cat.name}>
-                  <div className="flex justify-between text-xs font-heading mb-1 gap-2">
-                    <span className="font-semibold text-slate-700">{cat.name}</span>
-                    <span
-                      className={`font-num ${
-                        cat.isGood ? 'text-[#006A63]' : 'text-orange-700'
-                      }`}
-                    >
-                      ฿{fmt(cat.actual)} ({cat.actualPct.toFixed(1)}%) / เป้า ฿
-                      {fmt(cat.targetAmt)}
-                    </span>
+                <div key={cat.name} className="space-y-2">
+                  <div>
+                    <div className="flex justify-between text-xs font-heading mb-1 gap-2">
+                      <span className="font-semibold text-slate-700">{cat.name}</span>
+                      <span
+                        className={`font-num ${
+                          cat.isGood ? 'text-[#006A63]' : 'text-orange-700'
+                        }`}
+                      >
+                        ฿{fmt(cat.actual)} ({cat.actualPct.toFixed(1)}%) / เป้า ฿
+                        {fmt(cat.targetAmt)}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${barColor} rounded-full transition-all duration-300`}
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${barColor} rounded-full transition-all duration-300`}
-                      style={{ width: `${barWidth}%` }}
-                    />
-                  </div>
+
+                  {cat.key === 'essential' && (
+                    <div className="ml-3 pl-3 border-l-2 border-[#006A63]/25 space-y-1.5">
+                      {essentialSubBreakdown.items.map((sub) => (
+                        <div key={sub.key} className="flex items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className="w-2 h-2 rounded-xs shrink-0"
+                              style={{ backgroundColor: sub.color }}
+                            />
+                            <span className="text-slate-600 truncate">{sub.key}</span>
+                          </div>
+                          <span className="font-num text-slate-700 shrink-0">
+                            ฿{fmt(sub.amount)}{' '}
+                            <span className="text-slate-400">
+                              ({sub.shareOfIncome.toFixed(1)}% รายรับ ·{' '}
+                              {sub.shareOfEssential.toFixed(0)}% ในหมวด)
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -976,42 +1228,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {categoryBreakdown.map((cat) => (
-                  <tr key={cat.name} className="hover:bg-slate-50/70">
-                    <td className="py-2.5 pr-2 font-medium text-slate-800">
-                      {cat.name}
-                    </td>
-                    <td className="py-2.5 px-2 text-right font-num text-slate-600">
-                      ฿{fmt(cat.targetAmt)}
-                    </td>
-                    <td className="py-2.5 px-2 text-right font-num font-semibold text-slate-900">
-                      ฿{fmt(cat.actual)}
-                    </td>
-                    <td
-                      className={`py-2.5 px-2 text-right font-num ${
-                        cat.diff >= 0 ? 'text-[#0F766E]' : 'text-orange-700'
-                      }`}
-                    >
-                      {cat.diff >= 0 ? '+' : '-'}฿{fmt(Math.abs(cat.diff))}
-                    </td>
-                    <td className="py-2.5 pl-2 text-right whitespace-nowrap">
-                      {cat.isGood ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-[#0F766E]">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>ตามเกณฑ์</span>
-                        </span>
-                      ) : cat.isSavings ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-amber-700">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>ต่ำกว่าเป้า</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-orange-700">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          <span>เกินงบ</span>
-                        </span>
-                      )}
-                    </td>
-                  </tr>
+                  <React.Fragment key={cat.name}>
+                    <tr className="hover:bg-slate-50/70">
+                      <td className="py-2.5 pr-2 font-medium text-slate-800">
+                        {cat.name}
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-num text-slate-600">
+                        ฿{fmt(cat.targetAmt)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-num font-semibold text-slate-900">
+                        ฿{fmt(cat.actual)}
+                      </td>
+                      <td
+                        className={`py-2.5 px-2 text-right font-num ${
+                          cat.diff >= 0 ? 'text-[#0F766E]' : 'text-orange-700'
+                        }`}
+                      >
+                        {cat.diff >= 0 ? '+' : '-'}฿{fmt(Math.abs(cat.diff))}
+                      </td>
+                      <td className="py-2.5 pl-2 text-right whitespace-nowrap">
+                        {cat.isGood ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-[#0F766E]">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>ตามเกณฑ์</span>
+                          </span>
+                        ) : cat.isSavings ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-amber-700">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>ต่ำกว่าเป้า</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-heading font-medium text-orange-700">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>เกินงบ</span>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                    {cat.key === 'essential' &&
+                      essentialSubBreakdown.items.map((sub) => (
+                        <tr key={sub.key} className="bg-slate-50/50 text-xs">
+                          <td className="py-1.5 pr-2 pl-5 text-slate-600">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                className="w-2 h-2 rounded-xs shrink-0"
+                                style={{ backgroundColor: sub.color }}
+                              />
+                              <span>{sub.key}</span>
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-num text-slate-400">
+                            —
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-num text-slate-700">
+                            ฿{fmt(sub.amount)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-num text-slate-500">
+                            {sub.shareOfEssential.toFixed(0)}% ในหมวด
+                          </td>
+                          <td className="py-1.5 pl-2 text-right text-slate-400">
+                            {sub.shareOfIncome.toFixed(1)}% รายรับ
+                          </td>
+                        </tr>
+                      ))}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

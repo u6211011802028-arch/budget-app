@@ -1,7 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { BudgetState, ExtraIncomeItem, MonthExpenseView } from '../types/budget';
-import { EXPENSE_CATEGORY_OPTIONS, fmt, getMonthExpenses, getMonthIncome } from '../data/defaultBudget';
+import {
+  ESSENTIAL_SUBCATEGORIES,
+  EXPENSE_CATEGORY_OPTIONS,
+  fmt,
+  getMonthExpenses,
+  getMonthIncome,
+  resolveEssentialSubcategory,
+} from '../data/defaultBudget';
 
 interface TransactionsViewProps {
   state: BudgetState;
@@ -55,7 +62,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       ) {
         return false;
       }
-      if (categoryFilter !== 'ALL' && item.category !== categoryFilter) return false;
+      if (categoryFilter !== 'ALL') {
+        if (categoryFilter.startsWith('SUB:')) {
+          const targetSub = categoryFilter.slice(4);
+          if (resolveEssentialSubcategory(item) !== targetSub) return false;
+        } else if (item.category !== categoryFilter) {
+          return false;
+        }
+      }
       if (statusFilter === 'PAID' && !item.isPaid) return false;
       if (statusFilter === 'UNPAID' && item.isPaid) return false;
       return true;
@@ -368,6 +382,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   {c.label}
                 </option>
               ))}
+              {ESSENTIAL_SUBCATEGORIES.map((sc) => (
+                <option key={sc.key} value={`SUB:${sc.key}`}>
+                  ↳ จำเป็น: {sc.shortLabel}
+                </option>
+              ))}
             </select>
 
             <select
@@ -460,7 +479,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       {item.name}
                     </td>
                     <td className="py-2.5 px-3 text-xs text-slate-600 font-heading">
-                      {item.category}
+                      <span>{item.category}</span>
+                      {resolveEssentialSubcategory(item) && (
+                        <span className="text-slate-400">
+                          {' '}
+                          · {resolveEssentialSubcategory(item)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-slate-500 text-xs">{item.note}</td>
                     <td

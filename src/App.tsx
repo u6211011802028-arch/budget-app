@@ -12,6 +12,7 @@ import {
   ActiveTab,
   BudgetCategory,
   BudgetState,
+  EssentialSubcategory,
   MonthExpenseView,
   SheetConnection,
   TargetPercentages,
@@ -475,6 +476,7 @@ export default function App() {
     amount: number;
     note: string;
     category: BudgetCategory;
+    subCategory?: EssentialSubcategory;
     paid: boolean;
     applyFutureMonths: boolean;
     recurringEndMonth: string;
@@ -526,6 +528,10 @@ export default function App() {
             name: data.name,
             note: data.note,
             category: data.category,
+            subCategory:
+              data.category === 'ค่าใช้จ่ายจำเป็น (40%)'
+                ? data.subCategory
+                : undefined,
             amounts: nextAmounts,
             paid: { ...exp.paid, [m]: data.paid },
             recurringEndMonth: data.applyFutureMonths
@@ -560,6 +566,7 @@ export default function App() {
     amount: number;
     note: string;
     category: BudgetCategory;
+    subCategory?: EssentialSubcategory;
     recurring: boolean;
     recurringEndMonth: string;
     recurringMonths: number;
@@ -617,6 +624,10 @@ export default function App() {
             name: data.name,
             note: data.note,
             category: data.category,
+            subCategory:
+              data.category === 'ค่าใช้จ่ายจำเป็น (40%)'
+                ? data.subCategory
+                : undefined,
             amounts,
             paid: { [prev.activeMonth]: data.paid },
             recurringEndMonth:
