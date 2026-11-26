@@ -12,7 +12,9 @@ interface GoogleSheetsModalProps {
   onPickFromDrive: () => void;
   onConnectById: (spreadsheetId: string) => void;
   onSelectTab: (sheetTitle: string) => void;
+  onPullFromSheet: () => void;
   onRequestCreateTemplate: () => void;
+  onToggleAutoSave: (enabled: boolean) => void;
   onDisconnect: () => void;
 }
 
@@ -25,7 +27,9 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   onPickFromDrive,
   onConnectById,
   onSelectTab,
+  onPullFromSheet,
   onRequestCreateTemplate,
+  onToggleAutoSave,
   onDisconnect,
 }) => {
   const [urlInput, setUrlInput] = useState(
@@ -103,7 +107,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
           {/* Option 2: Paste URL / ID */}
           <form onSubmit={handleSubmitUrl} className="space-y-2">
             <label className="block text-xs font-heading font-medium text-slate-600">
-              หรือวางลิงก์ / Spreadsheet ID ของไฟล์ที่มีอยู่แล้ว (ไม่ทับข้อมูลในแอป)
+              หรือวางลิงก์ / Spreadsheet ID ของไฟล์ที่มีอยู่แล้ว (ระบบจะดึงข้อมูลจากไฟล์มาอัปเดตในแอป)
             </label>
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -135,6 +139,11 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   <div className="text-sm font-heading font-semibold text-slate-900 truncate">
                     {connection.spreadsheetTitle}
                   </div>
+                  {connection.lastSyncedAt && (
+                    <div className="text-[11px] text-[#006A63] mt-0.5">
+                      บันทึกล่าสุด {connection.lastSyncedAt}
+                    </div>
+                  )}
                 </div>
                 <a
                   href={connection.spreadsheetUrl}
@@ -166,10 +175,32 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-xs text-slate-500">
-                  พร้อมบันทึกข้อมูลเข้าแท็บ &ldquo;{connection.selectedSheetTitle}&rdquo;
-                </span>
+              <label className="flex items-start gap-2.5 p-3 rounded-lg bg-[#E6F3F2]/60 border border-[#006A63]/20 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={connection.autoSave ?? true}
+                  onChange={(e) => onToggleAutoSave(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#006A63] rounded shrink-0"
+                />
+                <div className="text-xs">
+                  <div className="font-heading font-semibold text-[#004D48]">
+                    บันทึกข้อมูลเข้า Google Sheet อัตโนมัติเมื่อแก้ไข
+                  </div>
+                  <div className="text-slate-600 mt-0.5">
+                    เมื่อเปิดไว้ ระบบจะอัปเดตข้อมูลเข้าไฟล์นี้ให้อัตโนมัติหลังแก้ไขรายการประมาณ 2 วินาที
+                  </div>
+                </div>
+              </label>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onPullFromSheet}
+                  disabled={isLoading}
+                  className="text-xs font-heading font-medium text-[#006A63] hover:underline disabled:opacity-50"
+                >
+                  ดึงข้อมูลล่าสุดจากแท็บนี้มาอัปเดตในแอป
+                </button>
                 <button
                   type="button"
                   onClick={onDisconnect}

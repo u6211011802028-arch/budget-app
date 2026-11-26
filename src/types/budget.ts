@@ -84,4 +84,5 @@ export interface SheetConnection {
   detectedFormat: 'matrix' | 'transactions';
   lastSyncedAt: string | null;
   autoRefreshSec: number; // 0 = manual, 15, 30, 60
+  autoSave?: boolean;
 }

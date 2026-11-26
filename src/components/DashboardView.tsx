@@ -468,14 +468,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div
             className="text-xs text-slate-500 mt-2 truncate"
-            title={`รอบ 14: ฿${fmtCompact(incData.salary)} - ปกส. ฿${fmtCompact(incData.effectiveSocialSecurity)} = ฿${fmtCompact(incData.salaryNet14)} · รอบ 29: ฿${fmtCompact(incData.salary29)} - กองทุนสำรองฯ ฿${fmtCompact(incData.effectiveProvidentFund)} = ฿${fmtCompact(incData.salaryNet29)} · เสริม/อื่นๆ: ฿${fmtCompact(incData.side + incData.extrasTotal)}`}
+            title={`รอบ 14: ฿${fmtCompact(incData.salary)} - กองทุนสำรองฯ ฿${fmtCompact(incData.effectiveProvidentFund)} = ฿${fmtCompact(incData.salaryNet14)} · รอบ 29: ฿${fmtCompact(incData.salary29)} - ปกส. ฿${fmtCompact(incData.effectiveSocialSecurity)} = ฿${fmtCompact(incData.salaryNet29)} · เสริม/อื่นๆ: ฿${fmtCompact(incData.side + incData.extrasTotal)}`}
           >
             {incData.salary29 > 0
               ? `14 สุทธิ: ฿${fmtCompact(incData.salaryNet14)} · 29 สุทธิ: ฿${fmtCompact(incData.salaryNet29)}`
-              : incData.effectiveSocialSecurity > 0
-              ? `รอบ 14 สุทธิ ฿${fmtCompact(incData.salaryNet14)}${incData.providentFund > 0 ? ' · รอเงินรอบ 29 เข้าก่อนหัก PVD' : ` (หัก ปกส. -฿${fmtCompact(incData.effectiveSocialSecurity)})`}`
-              : incData.providentFund > 0
-              ? `เงินเดือน ฿${fmtCompact(incData.salary)} · รอเงินรอบ 29 เข้าก่อนหัก PVD`
+              : incData.effectiveProvidentFund > 0
+              ? `รอบ 14 สุทธิ ฿${fmtCompact(incData.salaryNet14)}${incData.socialSecurity > 0 ? ' · รอเงินรอบ 29 เข้าก่อนหัก ปกส.' : ` (หัก PVD -฿${fmtCompact(incData.effectiveProvidentFund)})`}`
+              : incData.socialSecurity > 0
+              ? `เงินเดือน ฿${fmtCompact(incData.salary)} · รอเงินรอบ 29 เข้าก่อนหัก ปกส.`
               : `เงินเดือน ฿${fmtCompact(incData.salary)} · เสริม/อื่นๆ ฿${fmtCompact(incData.side + incData.extrasTotal)}`}
           </div>
         </div>
