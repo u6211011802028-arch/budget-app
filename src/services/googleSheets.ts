@@ -380,9 +380,7 @@ function parseMatrixFormat(
     const incHeader = incomeTabRows[0].map((h) => String(h || '').trim().toLowerCase());
     const mCol = incHeader.findIndex((h) => h.includes('เดือน') || h.includes('month'));
     const sal29Col = incHeader.findIndex(
-      (h) =>
-        (h.includes('เงินเดือน') || h.includes('salary') || h.includes('รอบ')) &&
-        h.includes('29')
+      (h) => (h.includes('เงินเดือน') || h.includes('salary')) && h.includes('29')
     );
     const salCol = incHeader.findIndex(
       (h) => (h.includes('เงินเดือน') || h.includes('salary')) && !h.includes('29')
@@ -806,12 +804,14 @@ export async function writeBudgetStateToTabs(
     const incomeHeaders = [
       'เดือน',
       'เงินเดือนรอบวันที่ 14',
+      'หักประกันสังคม (รอบ 14)',
+      'รับสุทธิรอบวันที่ 14',
       'เงินเดือนรอบวันที่ 29',
+      'หักกองทุนสำรองเลี้ยงชีพ (รอบ 29)',
+      'รับสุทธิรอบวันที่ 29',
       'รายได้เสริม',
       'รายรับพิเศษ',
-      'หักประกันสังคม',
-      'หักกองทุนสำรองเลี้ยงชีพ',
-      'รายรับสุทธิ',
+      'รายรับสุทธิรวม',
     ];
     const incomeRows = state.months.map((m) => {
       const inc = state.incomes[m] || {
@@ -828,8 +828,10 @@ export async function writeBudgetStateToTabs(
       const extraSum = (inc.extras || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
       const sso = Math.max(0, Number(inc.socialSecurity) || 0);
       const pvd = Math.max(0, Number(inc.providentFund) || 0);
-      const netInc = sal14 + sal29 + side + extraSum - (sso + pvd);
-      return [m, sal14, sal29, side, extraSum, sso, pvd, netInc];
+      const net14 = sal14 - sso;
+      const net29 = sal29 - pvd;
+      const netInc = net14 + net29 + side + extraSum;
+      return [m, sal14, sso, net14, sal29, pvd, net29, side, extraSum, netInc];
     });
 
     const paidHeaders = ['รายการ', ...state.months];

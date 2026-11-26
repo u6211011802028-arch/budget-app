@@ -107,6 +107,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               }
               className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
             />
+            {incData.socialSecurity > 0 && (
+              <div className="mt-1.5 flex items-center justify-between text-[11px] font-num">
+                <span className="text-slate-500 font-heading">
+                  หลังหัก ปกส. (-฿{fmt(incData.socialSecurity)})
+                </span>
+                <span className="font-semibold text-[#006A63]">
+                  สุทธิ ฿{fmt(incData.salaryNet14)}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
@@ -130,6 +140,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               }
               className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-num font-semibold text-slate-900 focus:outline-none focus:border-[#006A63]"
             />
+            {incData.providentFund > 0 && (
+              <div className="mt-1.5 flex items-center justify-between text-[11px] font-num">
+                <span className="text-slate-500 font-heading">
+                  หลังหัก PVD (-฿{fmt(incData.providentFund)})
+                </span>
+                <span className="font-semibold text-[#006A63]">
+                  สุทธิ ฿{fmt(incData.salaryNet29)}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
@@ -167,7 +187,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 หักประกันสังคม (บาท)
               </label>
               <span className="text-[11px] font-heading text-rose-600/90">
-                หักประจำ/เดือน
+                หักจากรอบวันที่ 14
               </span>
             </div>
             <input
@@ -196,7 +216,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 หักกองทุนสำรองเลี้ยงชีพ (บาท)
               </label>
               <span className="text-[11px] font-heading text-rose-600/90">
-                หักประจำ/เดือน
+                หักจากรอบวันที่ 29
               </span>
             </div>
             <input
@@ -225,16 +245,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <span className="text-2xl font-num font-bold text-[#006A63] mt-0.5">
               ฿{fmt(incData.total)}
             </span>
-            {incData.deductionsTotal > 0 ? (
+            {(incData.deductionsTotal > 0 || incData.salary29 > 0) && (
               <span className="text-[11px] font-num text-[#004D48]/85 mt-0.5">
-                รับรวม ฿{fmt(incData.grossTotal)} · หัก -฿{fmt(incData.deductionsTotal)}
+                รอบ 14 สุทธิ ฿{fmt(incData.salaryNet14)} · รอบ 29 สุทธิ ฿
+                {fmt(incData.salaryNet29)}
               </span>
-            ) : (
-              incData.salary29 > 0 && (
-                <span className="text-[11px] font-num text-[#004D48]/80 mt-0.5">
-                  เงินเดือนรวม 2 รอบ ฿{fmt(incData.salaryTotal)}
-                </span>
-              )
             )}
           </div>
         </div>
@@ -257,7 +272,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="w-3.5 h-3.5 accent-[#006A63] rounded"
           />
           <span>
-            หักประกันสังคมและกองทุนสำรองเลี้ยงชีพยอดนี้ประจำทุกเดือน (ตั้งแต่ {m} เป็นต้นไป)
+            หักประกันสังคม (รอบ 14) และกองทุนสำรองเลี้ยงชีพ (รอบ 29) ประจำทุกเดือน (ตั้งแต่ {m} เป็นต้นไป)
           </span>
         </label>
 

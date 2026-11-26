@@ -424,10 +424,16 @@ export function getMonthIncome(state: BudgetState, month: string) {
   const socialSecurity = Math.max(0, Number(inc.socialSecurity) || 0);
   const providentFund = Math.max(0, Number(inc.providentFund) || 0);
   const deductionsTotal = socialSecurity + providentFund;
+  const salaryNet14 = salary - socialSecurity;
+  const salaryNet29 = salary29 - providentFund;
+  const salaryNetTotal = salaryNet14 + salaryNet29;
   return {
     salary,
     salary29,
     salaryTotal,
+    salaryNet14,
+    salaryNet29,
+    salaryNetTotal,
     side,
     extras,
     extrasTotal,
