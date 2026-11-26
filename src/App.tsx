@@ -746,15 +746,25 @@ export default function App() {
     subCategory?: EssentialSubcategory;
     paid: boolean;
     applyFutureMonths: boolean;
+    recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
   }) => {
     setState((prev) => {
       const m = prev.activeMonth;
-      const startIdx = prev.months.indexOf(m);
+      const startMonth = data.recurringStartMonth || m;
+      const activeIdx = prev.months.indexOf(m);
+      const startIdxInPrev = prev.months.indexOf(startMonth);
+      const rangeStartIdx =
+        activeIdx >= 0 && startIdxInPrev >= 0
+          ? Math.min(activeIdx, startIdxInPrev)
+          : activeIdx >= 0
+          ? activeIdx
+          : 0;
+
       const futureSeq = buildFutureMonthSequence(
         prev.months,
-        m,
+        startMonth,
         Math.max(36, (data.recurringMonths || 12) + 6)
       );
       const endIdxInSeq = data.recurringEndMonth
@@ -766,17 +776,17 @@ export default function App() {
         expenses: prev.expenses.map((exp) => {
           if (exp.id !== data.id) return exp;
           const nextAmounts = { ...exp.amounts };
-          if (data.applyFutureMonths && startIdx >= 0) {
+          if (data.applyFutureMonths) {
             prev.months.forEach((mon, idx) => {
-              if (idx >= startIdx) {
-                if (!data.recurringEndMonth) {
+              if (idx >= rangeStartIdx) {
+                const seqIdx = futureSeq.findIndex((item) => item.month === mon);
+                if (seqIdx < 0) {
+                  nextAmounts[mon] = 0;
+                } else if (!data.recurringEndMonth) {
                   nextAmounts[mon] = data.amount;
                 } else {
-                  const seqIdx = futureSeq.findIndex((item) => item.month === mon);
                   nextAmounts[mon] =
-                    endIdxInSeq >= 0 && seqIdx >= 0 && seqIdx <= endIdxInSeq
-                      ? data.amount
-                      : 0;
+                    endIdxInSeq >= 0 && seqIdx <= endIdxInSeq ? data.amount : 0;
                 }
               }
             });
@@ -835,15 +845,18 @@ export default function App() {
     category: BudgetCategory;
     subCategory?: EssentialSubcategory;
     recurring: boolean;
+    recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
     paid: boolean;
   }) => {
     setState((prev) => {
-      const startIdx = prev.months.indexOf(prev.activeMonth);
+      const startMonth = data.recurring
+        ? data.recurringStartMonth || prev.activeMonth
+        : prev.activeMonth;
       const futureSeq = buildFutureMonthSequence(
         prev.months,
-        prev.activeMonth,
+        startMonth,
         Math.max(36, (data.recurringMonths || 12) + 6)
       );
       const endIdxInSeq = data.recurringEndMonth
@@ -851,23 +864,19 @@ export default function App() {
         : -1;
 
       const amounts: Record<string, number> = {};
-      prev.months.forEach((mon, idx) => {
-        if (idx < startIdx) {
+      prev.months.forEach((mon) => {
+        if (!data.recurring) {
+          amounts[mon] = mon === prev.activeMonth ? data.amount : 0;
+          return;
+        }
+        const seqIdx = futureSeq.findIndex((item) => item.month === mon);
+        if (seqIdx < 0) {
           amounts[mon] = 0;
-        } else if (mon === prev.activeMonth) {
+        } else if (!data.recurringEndMonth) {
           amounts[mon] = data.amount;
-        } else if (data.recurring) {
-          if (!data.recurringEndMonth) {
-            amounts[mon] = data.amount;
-          } else {
-            const seqIdx = futureSeq.findIndex((item) => item.month === mon);
-            amounts[mon] =
-              endIdxInSeq >= 0 && seqIdx >= 0 && seqIdx <= endIdxInSeq
-                ? data.amount
-                : 0;
-          }
         } else {
-          amounts[mon] = 0;
+          amounts[mon] =
+            endIdxInSeq >= 0 && seqIdx <= endIdxInSeq ? data.amount : 0;
         }
       });
 
@@ -896,7 +905,7 @@ export default function App() {
                 ? data.subCategory
                 : undefined,
             amounts,
-            paid: { [prev.activeMonth]: data.paid },
+            paid: { [startMonth]: data.paid },
             recurringEndMonth:
               data.recurring && data.recurringEndMonth
                 ? data.recurringEndMonth

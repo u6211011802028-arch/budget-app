@@ -22,6 +22,7 @@ interface AddExpenseModalProps {
     category: BudgetCategory;
     subCategory?: EssentialSubcategory;
     recurring: boolean;
+    recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
     paid: boolean;
@@ -43,21 +44,29 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [categoryManual, setCategoryManual] = useState(false);
   const [subCategoryManual, setSubCategoryManual] = useState(false);
   const [recurring, setRecurring] = useState(false);
-  const [recurringMode, setRecurringMode] = useState<'fixed' | 'split'>('fixed');
+  const [recurringMode, setRecurringMode] = useState<'split' | 'fixed'>('split');
+  const [recurringStartMonth, setRecurringStartMonth] = useState(activeMonth);
   const [durationMonths, setDurationMonths] = useState('');
   const [recurringEndMonth, setRecurringEndMonth] = useState('');
   const [paid, setPaid] = useState(false);
 
   const parsedDuration = Math.max(0, parseInt(durationMonths, 10) || 0);
 
+  const startMonthOptions = useMemo(
+    () => buildFutureMonthSequence(months, months[0] || activeMonth, 24),
+    [months, activeMonth]
+  );
+
+  const effectiveStartMonth = recurringStartMonth || activeMonth;
+
   const futureOptions = useMemo(
     () =>
       buildFutureMonthSequence(
         months,
-        activeMonth,
+        effectiveStartMonth,
         Math.max(36, parsedDuration + 6)
       ),
-    [months, activeMonth, parsedDuration]
+    [months, effectiveStartMonth, parsedDuration]
   );
 
   useEffect(() => {
@@ -70,36 +79,51 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setCategoryManual(false);
       setSubCategoryManual(false);
       setRecurring(false);
-      setRecurringMode('fixed');
+      setRecurringMode('split');
+      setRecurringStartMonth(activeMonth);
       setDurationMonths('');
       setRecurringEndMonth('');
       setPaid(false);
     }
-  }, [isOpen]);
+  }, [isOpen, activeMonth]);
 
   if (!isOpen) return null;
 
   const numAmt = Number(amount) || 0;
   const effectiveMonths =
     recurring && recurringMode === 'split'
-      ? Math.max(1, parsedDuration || 10)
+      ? Math.max(1, parsedDuration || 3)
       : parsedDuration;
   const effectiveMonthlyAmount =
     recurring && recurringMode === 'split'
       ? Math.round((numAmt / effectiveMonths) * 100) / 100
       : numAmt;
 
+  const syncEndMonthForDuration = (startM: string, monthsCount: number) => {
+    const seq = buildFutureMonthSequence(
+      months,
+      startM,
+      Math.max(36, monthsCount + 6)
+    );
+    const target = seq[monthsCount - 1];
+    if (target) setRecurringEndMonth(target.month);
+  };
+
+  const handleStartMonthChange = (nextStart: string) => {
+    setRecurringStartMonth(nextStart);
+    if (parsedDuration >= 1) {
+      syncEndMonthForDuration(nextStart, parsedDuration);
+    } else if (recurringMode === 'split') {
+      setDurationMonths('3');
+      syncEndMonthForDuration(nextStart, 3);
+    }
+  };
+
   const handleDurationChange = (raw: string) => {
     setDurationMonths(raw);
     const n = parseInt(raw, 10);
     if (!isNaN(n) && n >= 1) {
-      const seq = buildFutureMonthSequence(
-        months,
-        activeMonth,
-        Math.max(36, n + 6)
-      );
-      const target = seq[n - 1];
-      if (target) setRecurringEndMonth(target.month);
+      syncEndMonthForDuration(effectiveStartMonth, n);
     } else if (raw.trim() === '' && recurringMode === 'fixed') {
       setRecurringEndMonth('');
     }
@@ -117,10 +141,10 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     }
   };
 
-  const handleModeSwitch = (mode: 'fixed' | 'split') => {
+  const handleModeSwitch = (mode: 'split' | 'fixed') => {
     setRecurringMode(mode);
     if (mode === 'split' && (!parsedDuration || parsedDuration < 1)) {
-      const defaultN = Math.min(10, futureOptions.length);
+      const defaultN = Math.min(3, futureOptions.length);
       setDurationMonths(String(defaultN));
       if (futureOptions[defaultN - 1]) {
         setRecurringEndMonth(futureOptions[defaultN - 1].month);
@@ -136,7 +160,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       recurring && recurringMode === 'split'
         ? recurringEndMonth ||
           futureOptions[effectiveMonths - 1]?.month ||
-          activeMonth
+          effectiveStartMonth
         : recurring
         ? recurringEndMonth
         : '';
@@ -149,6 +173,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       subCategory:
         category === 'ค่าใช้จ่ายจำเป็น (40%)' ? subCategory : undefined,
       recurring,
+      recurringStartMonth: effectiveStartMonth,
       recurringEndMonth: finalEndMonth,
       recurringMonths: recurring ? effectiveMonths : 1,
       paid,
@@ -210,7 +235,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             <div>
               <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
                 {recurring && recurringMode === 'split'
-                  ? 'ยอดรวมทั้งหมด (บาท) *'
+                  ? 'ยอดรวมทั้งหมดที่ผ่อน (บาท) *'
                   : 'จำนวนเงิน (บาท) *'}
               </label>
               <input
@@ -300,33 +325,30 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               type="checkbox"
               checked={recurring}
               onChange={(e) => {
-                setRecurring(e.target.checked);
-                if (!e.target.checked) {
+                const checked = e.target.checked;
+                setRecurring(checked);
+                if (checked) {
+                  setRecurringMode('split');
+                  setRecurringStartMonth(activeMonth);
+                  const defaultN = parsedDuration >= 1 ? parsedDuration : 3;
+                  setDurationMonths(String(defaultN));
+                  syncEndMonthForDuration(activeMonth, defaultN);
+                } else {
                   setRecurringEndMonth('');
                   setDurationMonths('');
-                  setRecurringMode('fixed');
+                  setRecurringStartMonth(activeMonth);
+                  setRecurringMode('split');
                 }
               }}
               className="w-4 h-4 accent-[#006A63] rounded"
             />
-            <span>ทำซ้ำทุกเดือน / ผ่อนรายเดือน (เริ่ม {activeMonth})</span>
+            <span>ผ่อนรายเดือน / ทำซ้ำทุกเดือน</span>
           </label>
 
           {recurring && (
             <div className="ml-6 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
-              {/* Fixed Monthly vs 0% Installment Split */}
+              {/* 0% Installment Split (Default) vs Fixed Monthly */}
               <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/70 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => handleModeSwitch('fixed')}
-                  className={`px-2 py-1.5 text-xs font-heading font-medium rounded-md transition ${
-                    recurringMode === 'fixed'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  จ่ายเท่ากันทุกเดือน
-                </button>
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('split')}
@@ -338,6 +360,39 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                 >
                   ผ่อน 0% (หารตามเดือน)
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeSwitch('fixed')}
+                  className={`px-2 py-1.5 text-xs font-heading font-medium rounded-md transition ${
+                    recurringMode === 'fixed'
+                      ? 'bg-white text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  จ่ายเท่ากันทุกเดือน
+                </button>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="add-expense-start-month"
+                  className="block text-xs font-heading font-medium text-slate-600 mb-1"
+                >
+                  เริ่มผ่อน / เริ่มจ่ายเดือนไหน
+                </label>
+                <select
+                  id="add-expense-start-month"
+                  value={effectiveStartMonth}
+                  onChange={(e) => handleStartMonthChange(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+                >
+                  {startMonthOptions.map((opt) => (
+                    <option key={opt.month} value={opt.month}>
+                      {opt.month}
+                      {opt.month === activeMonth ? ' (เดือนที่เลือกอยู่)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-12 gap-2">
@@ -356,7 +411,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                     required={recurringMode === 'split'}
                     value={durationMonths}
                     onChange={(e) => handleDurationChange(e.target.value)}
-                    placeholder={recurringMode === 'split' ? 'เช่น 10' : 'ไม่จำกัด'}
+                    placeholder={recurringMode === 'split' ? 'เช่น 3, 10' : 'ไม่จำกัด'}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-num bg-white focus:outline-none focus:border-[#006A63]"
                   />
                 </div>
@@ -391,14 +446,16 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   {recurringMode === 'split' ? (
                     <span className="font-heading text-[#006A63] font-semibold">
                       ผ่อน 0% นาน <span className="font-num">{effectiveMonths}</span> เดือน
-                      ({activeMonth} – {recurringEndMonth || futureOptions[effectiveMonths - 1]?.month})
+                      ({effectiveStartMonth} – {recurringEndMonth || futureOptions[effectiveMonths - 1]?.month})
                       · ตกเดือนละ{' '}
-                      <span className="font-num">฿{fmt(effectiveMonthlyAmount)}</span>
+                      <span className="font-num">฿{fmt(effectiveMonthlyAmount)}</span> (จากยอดรวม{' '}
+                      <span className="font-num">฿{fmt(numAmt)}</span>)
                     </span>
                   ) : parsedDuration > 0 ? (
                     <span className="font-heading">
                       จ่ายเดือนละ <span className="font-num font-semibold">฿{fmt(numAmt)}</span>{' '}
-                      นาน <span className="font-num">{parsedDuration}</span> เดือน · รวม{' '}
+                      นาน <span className="font-num">{parsedDuration}</span> เดือน ({effectiveStartMonth} –{' '}
+                      {recurringEndMonth || futureOptions[parsedDuration - 1]?.month}) · รวม{' '}
                       <span className="font-num font-semibold">
                         ฿{fmt(numAmt * parsedDuration)}
                       </span>
@@ -406,7 +463,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   ) : (
                     <span className="font-heading">
                       บันทึกเดือนละ <span className="font-num font-semibold">฿{fmt(numAmt)}</span>{' '}
-                      ตั้งแต่ {activeMonth} เป็นต้นไป
+                      ตั้งแต่ {effectiveStartMonth} เป็นต้นไป
                     </span>
                   )}
                 </div>
@@ -733,6 +790,7 @@ interface EditExpenseModalProps {
     subCategory?: EssentialSubcategory;
     paid: boolean;
     applyFutureMonths: boolean;
+    recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
   }) => void;
@@ -754,20 +812,28 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   const [subCategoryManual, setSubCategoryManual] = useState(false);
   const [paid, setPaid] = useState(false);
   const [applyFutureMonths, setApplyFutureMonths] = useState(false);
-  const [recurringMode, setRecurringMode] = useState<'fixed' | 'split'>('fixed');
+  const [recurringMode, setRecurringMode] = useState<'split' | 'fixed'>('split');
+  const [recurringStartMonth, setRecurringStartMonth] = useState(activeMonth);
   const [durationMonths, setDurationMonths] = useState('');
   const [recurringEndMonth, setRecurringEndMonth] = useState('');
 
   const parsedDuration = Math.max(0, parseInt(durationMonths, 10) || 0);
 
+  const startMonthOptions = useMemo(
+    () => buildFutureMonthSequence(months, months[0] || activeMonth, 24),
+    [months, activeMonth]
+  );
+
+  const effectiveStartMonth = recurringStartMonth || activeMonth;
+
   const futureOptions = useMemo(
     () =>
       buildFutureMonthSequence(
         months,
-        activeMonth,
+        effectiveStartMonth,
         Math.max(36, parsedDuration + 6)
       ),
-    [months, activeMonth, parsedDuration]
+    [months, effectiveStartMonth, parsedDuration]
   );
 
   useEffect(() => {
@@ -793,7 +859,8 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       setSubCategoryManual(!!expense.subCategory);
       setPaid(expense.isPaid);
       setApplyFutureMonths(false);
-      setRecurringMode('fixed');
+      setRecurringMode('split');
+      setRecurringStartMonth(activeMonth);
       const endM = expense.recurringEndMonth || '';
       setRecurringEndMonth(endM);
       if (endM) {
@@ -812,24 +879,38 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   const validAmt = !isNaN(numAmt) && numAmt >= 0 ? numAmt : 0;
   const effectiveMonths =
     applyFutureMonths && recurringMode === 'split'
-      ? Math.max(1, parsedDuration || 10)
+      ? Math.max(1, parsedDuration || 3)
       : parsedDuration;
   const effectiveMonthlyAmount =
     applyFutureMonths && recurringMode === 'split'
       ? Math.round((validAmt / effectiveMonths) * 100) / 100
       : validAmt;
 
+  const syncEndMonthForDuration = (startM: string, monthsCount: number) => {
+    const seq = buildFutureMonthSequence(
+      months,
+      startM,
+      Math.max(36, monthsCount + 6)
+    );
+    const target = seq[monthsCount - 1];
+    if (target) setRecurringEndMonth(target.month);
+  };
+
+  const handleStartMonthChange = (nextStart: string) => {
+    setRecurringStartMonth(nextStart);
+    if (parsedDuration >= 1) {
+      syncEndMonthForDuration(nextStart, parsedDuration);
+    } else if (recurringMode === 'split') {
+      setDurationMonths('3');
+      syncEndMonthForDuration(nextStart, 3);
+    }
+  };
+
   const handleDurationChange = (raw: string) => {
     setDurationMonths(raw);
     const n = parseInt(raw, 10);
     if (!isNaN(n) && n >= 1) {
-      const seq = buildFutureMonthSequence(
-        months,
-        activeMonth,
-        Math.max(36, n + 6)
-      );
-      const target = seq[n - 1];
-      if (target) setRecurringEndMonth(target.month);
+      syncEndMonthForDuration(effectiveStartMonth, n);
     } else if (raw.trim() === '' && recurringMode === 'fixed') {
       setRecurringEndMonth('');
     }
@@ -847,10 +928,10 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
     }
   };
 
-  const handleModeSwitch = (mode: 'fixed' | 'split') => {
+  const handleModeSwitch = (mode: 'split' | 'fixed') => {
     setRecurringMode(mode);
     if (mode === 'split' && (!parsedDuration || parsedDuration < 1)) {
-      const defaultN = Math.min(10, futureOptions.length);
+      const defaultN = Math.min(3, futureOptions.length);
       setDurationMonths(String(defaultN));
       if (futureOptions[defaultN - 1]) {
         setRecurringEndMonth(futureOptions[defaultN - 1].month);
@@ -866,7 +947,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       applyFutureMonths && recurringMode === 'split'
         ? recurringEndMonth ||
           futureOptions[effectiveMonths - 1]?.month ||
-          activeMonth
+          effectiveStartMonth
         : applyFutureMonths
         ? recurringEndMonth
         : '';
@@ -881,6 +962,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
         category === 'ค่าใช้จ่ายจำเป็น (40%)' ? subCategory : undefined,
       paid,
       applyFutureMonths,
+      recurringStartMonth: effectiveStartMonth,
       recurringEndMonth: finalEndMonth,
       recurringMonths: applyFutureMonths ? effectiveMonths : 1,
     });
@@ -932,7 +1014,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
             <div>
               <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
                 {applyFutureMonths && recurringMode === 'split'
-                  ? 'ยอดรวมทั้งหมด (บาท) *'
+                  ? 'ยอดรวมทั้งหมดที่ผ่อน (บาท) *'
                   : 'จำนวนเงิน (บาท) *'}
               </label>
               <input
@@ -1013,31 +1095,28 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
               type="checkbox"
               checked={applyFutureMonths}
               onChange={(e) => {
-                setApplyFutureMonths(e.target.checked);
-                if (!e.target.checked) {
-                  setRecurringMode('fixed');
+                const checked = e.target.checked;
+                setApplyFutureMonths(checked);
+                if (checked) {
+                  setRecurringMode('split');
+                  const startM = recurringStartMonth || activeMonth;
+                  setRecurringStartMonth(startM);
+                  const defaultN = parsedDuration >= 1 ? parsedDuration : 3;
+                  setDurationMonths(String(defaultN));
+                  syncEndMonthForDuration(startM, defaultN);
+                } else {
+                  setRecurringMode('split');
                 }
               }}
               className="w-4 h-4 accent-[#006A63] rounded"
             />
-            <span>ทำซ้ำทุกเดือน / ผ่อนรายเดือน (เริ่ม {activeMonth})</span>
+            <span>ผ่อนรายเดือน / ทำซ้ำทุกเดือน</span>
           </label>
 
           {applyFutureMonths && (
             <div className="ml-6 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
-              {/* Fixed Monthly vs 0% Installment Split */}
+              {/* 0% Installment Split (Default) vs Fixed Monthly */}
               <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/70 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => handleModeSwitch('fixed')}
-                  className={`px-2 py-1.5 text-xs font-heading font-medium rounded-md transition ${
-                    recurringMode === 'fixed'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  จ่ายเท่ากันทุกเดือน
-                </button>
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('split')}
@@ -1049,6 +1128,39 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
                 >
                   ผ่อน 0% (หารตามเดือน)
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeSwitch('fixed')}
+                  className={`px-2 py-1.5 text-xs font-heading font-medium rounded-md transition ${
+                    recurringMode === 'fixed'
+                      ? 'bg-white text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  จ่ายเท่ากันทุกเดือน
+                </button>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="edit-expense-start-month"
+                  className="block text-xs font-heading font-medium text-slate-600 mb-1"
+                >
+                  เริ่มผ่อน / เริ่มจ่ายเดือนไหน
+                </label>
+                <select
+                  id="edit-expense-start-month"
+                  value={effectiveStartMonth}
+                  onChange={(e) => handleStartMonthChange(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-heading bg-white focus:outline-none focus:border-[#006A63]"
+                >
+                  {startMonthOptions.map((opt) => (
+                    <option key={opt.month} value={opt.month}>
+                      {opt.month}
+                      {opt.month === activeMonth ? ' (เดือนที่เลือกอยู่)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-12 gap-2">
@@ -1067,7 +1179,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
                     required={recurringMode === 'split'}
                     value={durationMonths}
                     onChange={(e) => handleDurationChange(e.target.value)}
-                    placeholder={recurringMode === 'split' ? 'เช่น 10' : 'ไม่จำกัด'}
+                    placeholder={recurringMode === 'split' ? 'เช่น 3, 10' : 'ไม่จำกัด'}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-num bg-white focus:outline-none focus:border-[#006A63]"
                   />
                 </div>
@@ -1102,14 +1214,16 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
                   {recurringMode === 'split' ? (
                     <span className="font-heading text-[#006A63] font-semibold">
                       ผ่อน 0% นาน <span className="font-num">{effectiveMonths}</span> เดือน
-                      ({activeMonth} – {recurringEndMonth || futureOptions[effectiveMonths - 1]?.month})
+                      ({effectiveStartMonth} – {recurringEndMonth || futureOptions[effectiveMonths - 1]?.month})
                       · ตกเดือนละ{' '}
-                      <span className="font-num">฿{fmt(effectiveMonthlyAmount)}</span>
+                      <span className="font-num">฿{fmt(effectiveMonthlyAmount)}</span> (จากยอดรวม{' '}
+                      <span className="font-num">฿{fmt(validAmt)}</span>)
                     </span>
                   ) : parsedDuration > 0 ? (
                     <span className="font-heading">
                       จ่ายเดือนละ <span className="font-num font-semibold">฿{fmt(validAmt)}</span>{' '}
-                      นาน <span className="font-num">{parsedDuration}</span> เดือน · รวม{' '}
+                      นาน <span className="font-num">{parsedDuration}</span> เดือน ({effectiveStartMonth} –{' '}
+                      {recurringEndMonth || futureOptions[parsedDuration - 1]?.month}) · รวม{' '}
                       <span className="font-num font-semibold">
                         ฿{fmt(validAmt * parsedDuration)}
                       </span>
@@ -1117,7 +1231,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
                   ) : (
                     <span className="font-heading">
                       ปรับยอดเป็น <span className="font-num font-semibold">฿{fmt(validAmt)}</span>{' '}
-                      ตั้งแต่ {activeMonth} เป็นต้นไป
+                      ตั้งแต่ {effectiveStartMonth} เป็นต้นไป
                     </span>
                   )}
                 </div>

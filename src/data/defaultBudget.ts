@@ -659,29 +659,33 @@ export function suggestNextThaiMonth(months: string[]): string {
 
 export function buildFutureMonthSequence(
   months: string[],
-  activeMonth: string,
+  startMonth: string,
   extraFutureCount = 12
 ): { month: string; isExisting: boolean; countFromActive: number }[] {
-  const startIdx = Math.max(0, months.indexOf(activeMonth));
-  const existingFromActive = months.slice(startIdx);
-  const result: { month: string; isExisting: boolean; countFromActive: number }[] =
-    existingFromActive.map((m, idx) => ({
-      month: m,
-      isExisting: true,
-      countFromActive: idx + 1,
-    }));
-
+  const existingSet = new Set(months);
   const workingMonths = [...months];
-  for (let i = 0; i < extraFutureCount; i++) {
+  const minTotal = Math.max(workingMonths.length + extraFutureCount, extraFutureCount + 24);
+  for (let i = 0; i < minTotal; i++) {
     const next = suggestNextThaiMonth(workingMonths);
     if (!next || workingMonths.includes(next)) break;
     workingMonths.push(next);
-    result.push({
-      month: next,
-      isExisting: false,
-      countFromActive: result.length + 1,
-    });
   }
 
-  return result;
+  let startIdx = workingMonths.indexOf(startMonth);
+  if (startIdx < 0) startIdx = 0;
+
+  const sliced = workingMonths.slice(startIdx);
+  // Ensure at least extraFutureCount months from startMonth when possible
+  while (sliced.length < extraFutureCount) {
+    const next = suggestNextThaiMonth(workingMonths);
+    if (!next || workingMonths.includes(next)) break;
+    workingMonths.push(next);
+    sliced.push(next);
+  }
+
+  return sliced.map((mon, idx) => ({
+    month: mon,
+    isExisting: existingSet.has(mon),
+    countFromActive: idx + 1,
+  }));
 }
