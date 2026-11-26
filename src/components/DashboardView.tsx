@@ -46,6 +46,7 @@ interface DashboardViewProps {
   onOpenIncomeModal: () => void;
   onSwitchToTransactions: () => void;
   onUpdateTargetPercentages: (next: TargetPercentages) => void;
+  onSelectMonth?: (month: string) => void;
 }
 
 type ProportionStatusLevel = 'on-target' | 'warning' | 'off-target';
@@ -56,6 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenIncomeModal,
   onSwitchToTransactions,
   onUpdateTargetPercentages,
+  onSelectMonth,
 }) => {
   const [proportionBasis, setProportionBasis] = useState<'income' | 'expense'>('income');
   const [isEditingPct, setIsEditingPct] = useState(false);
@@ -290,6 +292,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       };
     });
   }, [state]);
+
+  // Monthly Net Summary & Previous-Month Comparison
+  const monthlyNetComparison = useMemo(() => {
+    const activeIdx = monthlyTrendData.findIndex((d) => d.month === m);
+    const curr =
+      activeIdx >= 0
+        ? monthlyTrendData[activeIdx]
+        : {
+            month: m,
+            รายรับ: incData.total,
+            รายจ่าย: totalExpense,
+            กระแสเงินสดสุทธิ: net,
+          };
+    const prev = activeIdx > 0 ? monthlyTrendData[activeIdx - 1] : null;
+    const netDiff = prev ? curr.กระแสเงินสดสุทธิ - prev.กระแสเงินสดสุทธิ : null;
+    const incomeDiff = prev ? curr.รายรับ - prev.รายรับ : null;
+    const expenseDiff = prev ? curr.รายจ่าย - prev.รายจ่าย : null;
+    const netDiffPct =
+      prev && Math.abs(prev.กระแสเงินสดสุทธิ) > 0
+        ? ((curr.กระแสเงินสดสุทธิ - prev.กระแสเงินสดสุทธิ) /
+            Math.abs(prev.กระแสเงินสดสุทธิ)) *
+          100
+        : null;
+
+    const monthsWithDelta = monthlyTrendData.map((row, idx) => {
+      const prevRow = idx > 0 ? monthlyTrendData[idx - 1] : null;
+      const momDiff = prevRow
+        ? row.กระแสเงินสดสุทธิ - prevRow.กระแสเงินสดสุทธิ
+        : null;
+      return {
+        ...row,
+        momDiff,
+        isCurrent: row.month === m,
+        isPrevious: prev ? row.month === prev.month : false,
+      };
+    });
+
+    return {
+      curr,
+      prev,
+      netDiff,
+      incomeDiff,
+      expenseDiff,
+      netDiffPct,
+      monthsWithDelta,
+    };
+  }, [monthlyTrendData, m, incData.total, totalExpense, net]);
 
   // Dynamic Breakdown Data (synced with custom target percentages)
   const categoryBreakdown = useMemo(() => {
@@ -564,6 +613,250 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="text-xs text-slate-500 mt-2">
             รอชำระอีก ฿{fmt(unpaidTotal)}
+          </div>
+        </div>
+      </div>
+
+      {/* Monthly Net Summary & Current vs Previous Month Comparison Card */}
+      <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+              สรุปยอดสุทธิรายเดือนและเปรียบเทียบเดือนก่อนหน้า
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {monthlyNetComparison.prev
+                ? `เปรียบเทียบยอดสุทธิ (รายรับรวมหักค่าใช้จ่าย) เดือน ${monthlyNetComparison.curr.month} กับ ${monthlyNetComparison.prev.month}`
+                : `ยอดสุทธิ (รายรับรวมหักค่าใช้จ่าย) เดือน ${monthlyNetComparison.curr.month} และภาพรวมทุกเดือนในแผน`}
+            </p>
+          </div>
+          {monthlyNetComparison.prev && monthlyNetComparison.netDiff !== null && (
+            <div
+              className={`inline-flex items-center gap-1.5 text-xs font-heading font-semibold self-start sm:self-auto ${
+                monthlyNetComparison.netDiff > 0
+                  ? 'text-[#0F766E]'
+                  : monthlyNetComparison.netDiff < 0
+                  ? 'text-orange-700'
+                  : 'text-slate-600'
+              }`}
+            >
+              {monthlyNetComparison.netDiff > 0 ? (
+                <TrendingUp className="w-4 h-4 shrink-0" />
+              ) : monthlyNetComparison.netDiff < 0 ? (
+                <TrendingDown className="w-4 h-4 shrink-0" />
+              ) : null}
+              <span>
+                {monthlyNetComparison.netDiff > 0
+                  ? `เดือนนี้เหลือสุทธิเพิ่มขึ้น +฿${fmt(monthlyNetComparison.netDiff)}`
+                  : monthlyNetComparison.netDiff < 0
+                  ? `เดือนนี้เหลือสุทธิลดลง -฿${fmt(Math.abs(monthlyNetComparison.netDiff))}`
+                  : 'ยอดสุทธิเท่ากับเดือนก่อนหน้า'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* 3-Column Comparison: Current Month | Previous Month | Difference */}
+        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
+          {/* Current Month */}
+          <div className="p-4 bg-[#E6F3F2]/40">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-heading font-semibold text-[#006A63]">
+                เดือนปัจจุบัน · {monthlyNetComparison.curr.month}
+              </span>
+              <span className="text-[11px] font-heading text-slate-500">
+                รายรับ − รายจ่าย
+              </span>
+            </div>
+            <div
+              className={`text-2xl font-num font-bold mt-1.5 ${
+                monthlyNetComparison.curr.กระแสเงินสดสุทธิ < 0
+                  ? 'text-orange-700'
+                  : 'text-[#006A63]'
+              }`}
+            >
+              {monthlyNetComparison.curr.กระแสเงินสดสุทธิ < 0 ? '-฿' : '+฿'}
+              {fmt(Math.abs(monthlyNetComparison.curr.กระแสเงินสดสุทธิ))}
+            </div>
+            <div className="mt-2 pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs font-num text-slate-600 gap-2">
+              <span>รับ ฿{fmtCompact(monthlyNetComparison.curr.รายรับ)}</span>
+              <span>จ่าย ฿{fmtCompact(monthlyNetComparison.curr.รายจ่าย)}</span>
+            </div>
+          </div>
+
+          {/* Previous Month */}
+          <div className="p-4 bg-slate-50/70">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-heading font-semibold text-slate-700">
+                เดือนก่อนหน้า · {monthlyNetComparison.prev?.month || 'ไม่มีข้อมูล'}
+              </span>
+              {monthlyNetComparison.prev && onSelectMonth && (
+                <button
+                  type="button"
+                  onClick={() => onSelectMonth(monthlyNetComparison.prev!.month)}
+                  className="text-[11px] font-heading text-[#006A63] hover:underline whitespace-nowrap"
+                >
+                  เปิดดูเดือนนี้
+                </button>
+              )}
+            </div>
+            {monthlyNetComparison.prev ? (
+              <>
+                <div
+                  className={`text-2xl font-num font-bold mt-1.5 ${
+                    monthlyNetComparison.prev.กระแสเงินสดสุทธิ < 0
+                      ? 'text-orange-700'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {monthlyNetComparison.prev.กระแสเงินสดสุทธิ < 0 ? '-฿' : '+฿'}
+                  {fmt(Math.abs(monthlyNetComparison.prev.กระแสเงินสดสุทธิ))}
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs font-num text-slate-600 gap-2">
+                  <span>รับ ฿{fmtCompact(monthlyNetComparison.prev.รายรับ)}</span>
+                  <span>จ่าย ฿{fmtCompact(monthlyNetComparison.prev.รายจ่าย)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="mt-2 text-xs text-slate-500 leading-relaxed">
+                เดือนนี้เป็นเดือนแรกในแผนการเงิน ลองเลือกเดือนถัดไปเพื่อดูการเปรียบเทียบกับเดือนก่อนหน้า
+              </div>
+            )}
+          </div>
+
+          {/* Delta / Comparison */}
+          <div className="p-4 bg-white">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-heading font-semibold text-slate-700">
+                ส่วนต่างเทียบเดือนก่อนหน้า
+              </span>
+              {monthlyNetComparison.netDiffPct !== null && (
+                <span
+                  className={`text-xs font-num font-semibold ${
+                    monthlyNetComparison.netDiff !== null &&
+                    monthlyNetComparison.netDiff >= 0
+                      ? 'text-[#0F766E]'
+                      : 'text-orange-700'
+                  }`}
+                >
+                  {monthlyNetComparison.netDiffPct >= 0 ? '+' : ''}
+                  {monthlyNetComparison.netDiffPct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+            {monthlyNetComparison.prev && monthlyNetComparison.netDiff !== null ? (
+              <>
+                <div
+                  className={`text-2xl font-num font-bold mt-1.5 ${
+                    monthlyNetComparison.netDiff < 0
+                      ? 'text-orange-700'
+                      : monthlyNetComparison.netDiff > 0
+                      ? 'text-[#0F766E]'
+                      : 'text-slate-700'
+                  }`}
+                >
+                  {monthlyNetComparison.netDiff > 0
+                    ? '+฿'
+                    : monthlyNetComparison.netDiff < 0
+                    ? '-฿'
+                    : '฿'}
+                  {fmt(Math.abs(monthlyNetComparison.netDiff))}
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs font-num text-slate-600 gap-2">
+                  <span>
+                    รับ{' '}
+                    {(monthlyNetComparison.incomeDiff || 0) >= 0 ? '+฿' : '-฿'}
+                    {fmtCompact(Math.abs(monthlyNetComparison.incomeDiff || 0))}
+                  </span>
+                  <span>
+                    จ่าย{' '}
+                    {(monthlyNetComparison.expenseDiff || 0) >= 0 ? '+฿' : '-฿'}
+                    {fmtCompact(Math.abs(monthlyNetComparison.expenseDiff || 0))}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="mt-2 text-xs text-slate-400">
+                ยังไม่มีฐานข้อมูลเดือนก่อนหน้าสำหรับคำนวณส่วนต่าง
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* All Months Net Breakdown Strip */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-heading font-semibold text-slate-700">
+              สรุปยอดสุทธิของแต่ละเดือน (คลิกเดือนเพื่อสลับดู)
+            </span>
+            <span className="font-num text-slate-500">
+              ทั้งหมด {monthlyNetComparison.monthsWithDelta.length} เดือน
+            </span>
+          </div>
+          <div className="overflow-x-auto border border-slate-200 rounded-lg">
+            <div className="flex divide-x divide-slate-200 min-w-max">
+              {monthlyNetComparison.monthsWithDelta.map((row) => (
+                <button
+                  key={row.month}
+                  type="button"
+                  onClick={() => onSelectMonth?.(row.month)}
+                  className={`min-w-[148px] flex-1 p-3 text-left transition ${
+                    row.isCurrent
+                      ? 'bg-[#E6F3F2]/75'
+                      : row.isPrevious
+                      ? 'bg-slate-50/90 hover:bg-slate-100/80'
+                      : 'bg-white hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-xs font-heading font-semibold ${
+                        row.isCurrent ? 'text-[#006A63]' : 'text-slate-800'
+                      }`}
+                    >
+                      {row.month}
+                    </span>
+                    {row.isCurrent ? (
+                      <span className="text-[10px] font-heading font-semibold text-[#006A63]">
+                        ปัจจุบัน
+                      </span>
+                    ) : row.isPrevious ? (
+                      <span className="text-[10px] font-heading font-medium text-slate-500">
+                        ก่อนหน้า
+                      </span>
+                    ) : null}
+                  </div>
+                  <div
+                    className={`text-base font-num font-bold mt-1 ${
+                      row.กระแสเงินสดสุทธิ < 0 ? 'text-orange-700' : 'text-slate-900'
+                    }`}
+                  >
+                    {row.กระแสเงินสดสุทธิ < 0 ? '-฿' : '+฿'}
+                    {fmtCompact(Math.abs(row.กระแสเงินสดสุทธิ))}
+                  </div>
+                  <div className="text-[11px] font-num text-slate-500 mt-1">
+                    รับ {fmtCompact(row.รายรับ)} · จ่าย {fmtCompact(row.รายจ่าย)}
+                  </div>
+                  {row.momDiff !== null && (
+                    <div
+                      className={`text-[11px] font-num mt-0.5 ${
+                        row.momDiff > 0
+                          ? 'text-[#0F766E]'
+                          : row.momDiff < 0
+                          ? 'text-orange-700'
+                          : 'text-slate-400'
+                      }`}
+                    >
+                      {row.momDiff > 0
+                        ? `▲ +฿${fmtCompact(row.momDiff)}`
+                        : row.momDiff < 0
+                        ? `▼ -฿${fmtCompact(Math.abs(row.momDiff))}`
+                        : '• เท่าเดิม'}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

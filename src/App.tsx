@@ -1461,6 +1461,7 @@ export default function App() {
             onOpenIncomeModal={() => setIsIncomeModalOpen(true)}
             onSwitchToTransactions={() => handleTabChange('transactions')}
             onUpdateTargetPercentages={handleUpdateTargetPercentages}
+            onSelectMonth={handleMonthChange}
           />
         )}
 
