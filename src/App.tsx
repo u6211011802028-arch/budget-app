@@ -5,7 +5,6 @@ import {
   FileSpreadsheet,
   LogOut,
   Plus,
-  RefreshCw,
   RotateCcw,
   UploadCloud,
 } from 'lucide-react';
@@ -36,10 +35,8 @@ import {
 import {
   AuthExpiredError,
   createBudgetTemplateSpreadsheet,
-  fetchSheetValues,
   fetchSpreadsheetMeta,
   openGooglePicker,
-  parseGoogleSheetsToBudget,
   writeBudgetStateToTabs,
 } from './services/googleSheets';
 import { GoogleSignInButton } from './components/GoogleSignInButton';
@@ -169,7 +166,7 @@ export default function App() {
     }
   }, [sheetConn]);
 
-  const syncFromSpreadsheet = useCallback(
+  const connectToSpreadsheet = useCallback(
     async (
       spreadsheetId: string,
       preferredTab?: string,
@@ -187,7 +184,7 @@ export default function App() {
       setIsSyncing(true);
       setSyncError(null);
 
-      const performSync = async (activeToken: string) => {
+      const performConnect = async (activeToken: string) => {
         const meta = await fetchSpreadsheetMeta(activeToken, spreadsheetId);
         if (!meta.sheets.length) {
           throw new Error('ไม่พบแผ่นงาน (Sheet Tab) ในไฟล์สเปรดชีตนี้');
@@ -198,80 +195,34 @@ export default function App() {
             ? preferredTab
             : meta.sheets[0].title;
 
-        const primaryRows = await fetchSheetValues(
-          activeToken,
-          meta.spreadsheetId,
-          targetTab
-        );
-
-        // Fetch optional helper tabs if present in this spreadsheet
-        const incomeTab = meta.sheets.find((s) =>
-          s.title.includes('รายรับ')
-        );
-        const paidTab = meta.sheets.find((s) =>
-          s.title.includes('สถานะชำระ')
-        );
-
-        const [incomeRows, paidRows] = await Promise.all([
-          incomeTab && incomeTab.title !== targetTab
-            ? fetchSheetValues(
-                activeToken,
-                meta.spreadsheetId,
-                incomeTab.title
-              ).catch(() => null)
-            : Promise.resolve(null),
-          paidTab && paidTab.title !== targetTab
-            ? fetchSheetValues(
-                activeToken,
-                meta.spreadsheetId,
-                paidTab.title
-              ).catch(() => null)
-            : Promise.resolve(null),
-        ]);
-
-        const parsed = parseGoogleSheetsToBudget(
-          primaryRows,
-          incomeRows,
-          paidRows,
-          stateRef.current
-        );
-
-        setState(parsed.state);
-
-        const nowTime = new Date().toLocaleTimeString('th-TH', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        });
-
         setSheetConn((prev) => ({
           spreadsheetId: meta.spreadsheetId,
           spreadsheetTitle: meta.title,
           spreadsheetUrl: meta.spreadsheetUrl,
           sheets: meta.sheets,
           selectedSheetTitle: targetTab,
-          detectedFormat: parsed.detectedFormat,
-          lastSyncedAt: nowTime,
+          detectedFormat: 'matrix',
+          lastSyncedAt: prev?.spreadsheetId === meta.spreadsheetId ? prev.lastSyncedAt : null,
           autoRefreshSec:
             autoRefreshOverride !== undefined
               ? autoRefreshOverride
-              : prev?.autoRefreshSec ?? 30,
+              : prev?.autoRefreshSec ?? 0,
         }));
 
         setSyncBannerMsg(
-          `ดึงข้อมูลล่าสุดจาก "${meta.title}" สำเร็จ (${parsed.rowCount} แถว)`
+          `เชื่อมต่อไฟล์ "${meta.title}" แล้ว — กด "บันทึกข้อมูลเข้า Google Sheet" เมื่อต้องการอัปเดตไฟล์`
         );
       };
 
       try {
-        await performSync(token);
+        await performConnect(token);
       } catch (err: any) {
         if (err instanceof AuthExpiredError) {
           clearCachedToken();
           const renewed = await refreshAccessTokenSilently();
           if (renewed) {
             try {
-              await performSync(renewed);
+              await performConnect(renewed);
               return;
             } catch (retryErr: any) {
               if (retryErr instanceof AuthExpiredError) {
@@ -281,7 +232,7 @@ export default function App() {
               } else {
                 setSyncError(
                   retryErr?.message ||
-                    'เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Google Sheets'
+                    'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets'
                 );
               }
               return;
@@ -291,7 +242,7 @@ export default function App() {
           setSyncError(err.message);
         } else {
           setSyncError(
-            err?.message || 'เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Google Sheets'
+            err?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets'
           );
         }
       } finally {
@@ -314,7 +265,7 @@ export default function App() {
           hasAutoReconnectedRef.current = true;
           const savedPref = loadSheetPref();
           if (savedPref?.spreadsheetId) {
-            syncFromSpreadsheet(
+            connectToSpreadsheet(
               savedPref.spreadsheetId,
               savedPref.selectedSheetTitle,
               savedPref.autoRefreshSec
@@ -329,7 +280,7 @@ export default function App() {
       }
     );
     return () => unsubscribe();
-  }, [syncFromSpreadsheet]);
+  }, [connectToSpreadsheet]);
 
   // Proactive silent token refresh before the 1-hour OAuth token expires
   useEffect(() => {
@@ -343,21 +294,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [needsAuth]);
 
-  // Real-time auto-refresh polling from connected Google Sheet
-  useEffect(() => {
-    if (needsAuth || !sheetConn || sheetConn.autoRefreshSec <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      syncFromSpreadsheet(
-        sheetConn.spreadsheetId,
-        sheetConn.selectedSheetTitle
-      );
-    }, sheetConn.autoRefreshSec * 1000);
-
-    return () => window.clearInterval(timer);
-  }, [needsAuth, sheetConn, syncFromSpreadsheet]);
-
   const handleLogin = async () => {
     setIsLoggingIn(true);
     setSyncError(null);
@@ -370,7 +306,7 @@ export default function App() {
       const savedPref = loadSheetPref();
       if (savedPref?.spreadsheetId) {
         hasAutoReconnectedRef.current = true;
-        await syncFromSpreadsheet(
+        await connectToSpreadsheet(
           savedPref.spreadsheetId,
           savedPref.selectedSheetTitle,
           savedPref.autoRefreshSec
@@ -400,7 +336,7 @@ export default function App() {
       token,
       async (file) => {
         setIsSheetsModalOpen(false);
-        await syncFromSpreadsheet(file.id);
+        await connectToSpreadsheet(file.id);
       },
       (msg) => {
         setSyncError(msg);
@@ -409,7 +345,7 @@ export default function App() {
   };
 
   const handleConnectById = async (spreadsheetId: string) => {
-    await syncFromSpreadsheet(spreadsheetId);
+    await connectToSpreadsheet(spreadsheetId);
     setIsSheetsModalOpen(false);
   };
 
@@ -838,10 +774,10 @@ export default function App() {
           selectedSheetTitle: meta.sheets[0]?.title || 'รายจ่าย-40-30-20-10',
           detectedFormat: 'matrix',
           lastSyncedAt: nowTime,
-          autoRefreshSec: 30,
+          autoRefreshSec: 0,
         });
         setSyncBannerMsg(
-          `สร้าง Google Sheet "${meta.title}" และเชื่อมต่อสำเร็จแล้ว`
+          `สร้าง Google Sheet "${meta.title}" และบันทึกข้อมูลเข้าไฟล์เรียบร้อยแล้ว`
         );
         setIsSheetsModalOpen(false);
         setConfirmAction(null);
@@ -863,7 +799,10 @@ export default function App() {
         setConfirmAction(null);
         return;
       }
-      const token = getAccessToken();
+      let token = getAccessToken();
+      if (!token) {
+        token = await refreshAccessTokenSilently();
+      }
       if (!token) {
         setNeedsAuth(true);
         setConfirmAction(null);
@@ -872,16 +811,13 @@ export default function App() {
       setIsConfirmLoading(true);
       setSyncError(null);
       try {
-        const hasHelperTabs =
-          sheetConn.sheets.some((s) => s.title === 'รายรับประจำเดือน') &&
-          sheetConn.sheets.some((s) => s.title === 'สถานะชำระ');
-
-        await writeBudgetStateToTabs(
+        const updatedSheets = await writeBudgetStateToTabs(
           token,
           sheetConn.spreadsheetId,
           sheetConn.selectedSheetTitle,
           state,
-          hasHelperTabs
+          true,
+          sheetConn.sheets.map((s) => s.title)
         );
 
         const nowTime = new Date().toLocaleTimeString('th-TH', {
@@ -890,10 +826,16 @@ export default function App() {
           second: '2-digit',
         });
         setSheetConn((prev) =>
-          prev ? { ...prev, lastSyncedAt: nowTime } : prev
+          prev
+            ? {
+                ...prev,
+                sheets: updatedSheets || prev.sheets,
+                lastSyncedAt: nowTime,
+              }
+            : prev
         );
         setSyncBannerMsg(
-          `อัปเดตข้อมูลไปยัง "${sheetConn.spreadsheetTitle}" (${sheetConn.selectedSheetTitle}) เรียบร้อยแล้ว`
+          `บันทึกข้อมูลเข้า Google Sheet "${sheetConn.spreadsheetTitle}" (${sheetConn.selectedSheetTitle}) เรียบร้อยแล้ว`
         );
         setConfirmAction(null);
       } catch (err: any) {
@@ -901,7 +843,7 @@ export default function App() {
           clearCachedToken();
           setNeedsAuth(true);
         }
-        setSyncError(err?.message || 'อัปเดตข้อมูลไปยัง Google Sheets ไม่สำเร็จ');
+        setSyncError(err?.message || 'บันทึกข้อมูลเข้า Google Sheets ไม่สำเร็จ');
         setConfirmAction(null);
       } finally {
         setIsConfirmLoading(false);
@@ -930,26 +872,27 @@ export default function App() {
     }
     if (confirmAction.type === 'create-sheet') {
       return {
-        title: 'สร้าง Google Sheet ใหม่ใน Google Drive',
+        title: 'สร้าง Google Sheet ใหม่และบันทึกข้อมูล',
         message:
-          'ระบบจะสร้างสเปรดชีตใหม่ชื่อ "แผนการเงิน 40-30-20-10 (ซิงก์อัตโนมัติ)" ใน Google Drive ของคุณ พร้อมนำเข้าข้อมูลปัจจุบันลงในแผ่นงาน',
+          'ระบบจะสร้างสเปรดชีตใหม่ชื่อ "แผนการเงิน 40-30-20-10 (ซิงก์อัตโนมัติ)" ใน Google Drive ของคุณ พร้อมบันทึกข้อมูลทั้งหมดจากแอปลงในแผ่นงาน',
         details: [
           'แผ่นงาน 1: รายจ่าย-40-30-20-10',
-          'แผ่นงาน 2: รายรับประจำเดือน',
+          'แผ่นงาน 2: รายรับประจำเดือน (เงินเดือน 2 รอบ, ปกส., กองทุนสำรองฯ)',
           'แผ่นงาน 3: สถานะชำระ',
         ],
-        confirmLabel: 'ยืนยันสร้าง Google Sheet',
+        confirmLabel: 'ยืนยันสร้างและบันทึกเข้า Sheet',
         variant: 'primary' as const,
       };
     }
     return {
-      title: 'ยืนยันการอัปเดตข้อมูลไปยัง Google Sheets',
-      message: `ระบบจะเขียนข้อมูลล่าสุดจากแดชบอร์ดทับลงในสเปรดชีต "${sheetConn?.spreadsheetTitle}" เพื่อซิงก์ข้อมูลให้ตรงกัน`,
+      title: 'ยืนยันการบันทึกข้อมูลเข้า Google Sheets',
+      message: `ระบบจะบันทึกข้อมูลรายรับ-รายจ่ายล่าสุดทั้งหมดจากแอปลงในสเปรดชีต "${sheetConn?.spreadsheetTitle}"`,
       details: [
-        `แผ่นงานหลักที่จะอัปเดต: ${sheetConn?.selectedSheetTitle}`,
-        `จำนวนรายการค่าใช้จ่าย: ${state.expenses.length} รายการ (${state.months.length} เดือน)`,
+        `แท็บรายจ่ายหลัก: ${sheetConn?.selectedSheetTitle}`,
+        'แท็บข้อมูลประกอบ: รายรับประจำเดือน, สถานะชำระ',
+        `จำนวนข้อมูล: ${state.expenses.length} รายการ (${state.months.length} เดือน)`,
       ],
-      confirmLabel: 'ยืนยันอัปเดตไปยัง Google Sheets',
+      confirmLabel: 'ยืนยันบันทึกเข้า Google Sheet',
       variant: 'primary' as const,
     };
   })();
@@ -1090,7 +1033,7 @@ export default function App() {
             </button>
           </div>
 
-          {/* Google Sheets Live Sync Controls */}
+          {/* Google Sheets Export Controls */}
           <div className="flex flex-wrap items-center gap-2">
             {needsAuth ? (
               <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600">
@@ -1102,7 +1045,7 @@ export default function App() {
                     </span>
                   </span>
                 ) : (
-                  <span>เชื่อมต่อ Google Sheets เพื่อดึงข้อมูลและอัปเดตกราฟอัตโนมัติ</span>
+                  <span>เชื่อมต่อ Google Sheets เพื่อบันทึกข้อมูลลงไฟล์ของคุณ</span>
                 )}
                 <GoogleSignInButton
                   onClick={handleLogin}
@@ -1111,7 +1054,7 @@ export default function App() {
                     isLoggingIn
                       ? 'กำลังเชื่อมต่อ...'
                       : savedSheetPref
-                      ? 'ซิงก์ต่อทันที'
+                      ? 'เชื่อมต่อ Sheet ต่อ'
                       : 'เชื่อมต่อ Google'
                   }
                 />
@@ -1123,7 +1066,7 @@ export default function App() {
                 className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg bg-[#006A63] hover:bg-[#004D48] text-white text-xs sm:text-sm font-heading font-semibold whitespace-nowrap transition"
               >
                 <FileSpreadsheet className="w-4 h-4" />
-                <span>เลือก / เชื่อมต่อ Google Sheets</span>
+                <span>เลือก / สร้าง Google Sheet</span>
               </button>
             ) : (
               <>
@@ -1137,56 +1080,19 @@ export default function App() {
                   <span className="truncate">{sheetConn.spreadsheetTitle}</span>
                 </button>
 
-                <select
-                  value={sheetConn.autoRefreshSec}
-                  onChange={(e) =>
-                    setSheetConn((prev) =>
-                      prev
-                        ? { ...prev, autoRefreshSec: Number(e.target.value) }
-                        : prev
-                    )
-                  }
-                  aria-label="ความถี่ซิงก์อัตโนมัติ"
-                  className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-heading bg-white text-slate-700 focus:outline-none focus:border-[#006A63]"
-                >
-                  <option value={15}>ซิงก์ทุก 15 วิ</option>
-                  <option value={30}>ซิงก์ทุก 30 วิ</option>
-                  <option value={60}>ซิงก์ทุก 1 นาที</option>
-                  <option value={0}>ซิงก์ด้วยตนเอง</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    syncFromSpreadsheet(
-                      sheetConn.spreadsheetId,
-                      sheetConn.selectedSheetTitle
-                    )
-                  }
-                  disabled={isSyncing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-heading font-medium text-slate-700 whitespace-nowrap transition disabled:opacity-50"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 text-[#006A63] ${
-                      isSyncing ? 'animate-spin' : ''
-                    }`}
-                  />
-                  <span>{isSyncing ? 'กำลังซิงก์...' : 'ซิงก์จาก Sheet'}</span>
-                </button>
-
                 <button
                   type="button"
                   onClick={() => setConfirmAction({ type: 'push-to-sheet' })}
                   disabled={isSyncing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#006A63] hover:bg-[#004D48] text-white text-xs font-heading font-medium whitespace-nowrap transition disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#006A63] hover:bg-[#004D48] text-white text-xs font-heading font-semibold whitespace-nowrap transition disabled:opacity-50"
                 >
                   <UploadCloud className="w-3.5 h-3.5" />
-                  <span>บันทึกกลับ Sheet</span>
+                  <span>{isSyncing ? 'กำลังบันทึก...' : 'บันทึกข้อมูลเข้า Google Sheet'}</span>
                 </button>
 
                 {sheetConn.lastSyncedAt && (
                   <span className="text-xs text-slate-500 whitespace-nowrap">
-                    ซิงก์ล่าสุด {sheetConn.lastSyncedAt}
+                    บันทึกล่าสุด {sheetConn.lastSyncedAt}
                   </span>
                 )}
               </>
@@ -1273,9 +1179,9 @@ export default function App() {
         onPickFromDrive={handlePickFromDrive}
         onConnectById={handleConnectById}
         onSelectTab={(tabTitle) => {
-          if (sheetConn) {
-            syncFromSpreadsheet(sheetConn.spreadsheetId, tabTitle);
-          }
+          setSheetConn((prev) =>
+            prev ? { ...prev, selectedSheetTitle: tabTitle } : prev
+          );
         }}
         onRequestCreateTemplate={() => setConfirmAction({ type: 'create-sheet' })}
         onDisconnect={handleDisconnectSheet}

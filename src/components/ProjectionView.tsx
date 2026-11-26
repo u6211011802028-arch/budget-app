@@ -61,7 +61,7 @@ export const ProjectionView: React.FC<ProjectionViewProps> = ({
               ตารางสรุปแนวโน้มรายรับ-รายจ่ายล่วงหน้าทุกเดือน
             </h2>
             <p className="text-xs text-slate-500">
-              อัปเดตอัตโนมัติตามข้อมูลจาก Google Sheets และเดือนที่คุณเพิ่มเข้ามา
+              อัปเดตอัตโนมัติตามรายการรับ-จ่ายและเดือนที่คุณเพิ่มเข้ามา
             </p>
           </div>
           <button

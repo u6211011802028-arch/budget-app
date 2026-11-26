@@ -57,7 +57,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
           <div className="flex items-center gap-2.5">
             <FileSpreadsheet className="w-5 h-5 text-[#006A63]" />
             <h3 className="text-lg font-heading font-semibold text-slate-900">
-              เชื่อมต่อ Google Sheets อัตโนมัติ
+              เชื่อมต่อ Google Sheets สำหรับบันทึกข้อมูล
             </h3>
           </div>
           <button
@@ -96,14 +96,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#006A63] hover:bg-[#004D48] text-sm font-heading font-semibold text-white transition disabled:opacity-50"
             >
               <PlusCircle className="w-4 h-4" />
-              <span>สร้าง Sheet แม่แบบใหม่</span>
+              <span>สร้าง Sheet ใหม่และบันทึกเลย</span>
             </button>
           </div>
 
           {/* Option 2: Paste URL / ID */}
           <form onSubmit={handleSubmitUrl} className="space-y-2">
             <label className="block text-xs font-heading font-medium text-slate-600">
-              หรือวางลิงก์ / Spreadsheet ID ของไฟล์ที่มีอยู่แล้ว
+              หรือวางลิงก์ / Spreadsheet ID ของไฟล์ที่มีอยู่แล้ว (ไม่ทับข้อมูลในแอป)
             </label>
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -121,7 +121,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                 disabled={isLoading}
                 className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-heading font-medium whitespace-nowrap transition disabled:opacity-50"
               >
-                {isLoading ? 'กำลังโหลด...' : 'ดึงข้อมูล'}
+                {isLoading ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อไฟล์'}
               </button>
             </div>
           </form>
@@ -131,7 +131,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
             <div className="pt-4 border-t border-slate-200 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-xs text-slate-500">สเปรดชีตที่เชื่อมต่ออยู่</div>
+                  <div className="text-xs text-slate-500">สเปรดชีตปลายทางที่เชื่อมต่ออยู่</div>
                   <div className="text-sm font-heading font-semibold text-slate-900 truncate">
                     {connection.spreadsheetTitle}
                   </div>
@@ -149,7 +149,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
               {connection.sheets.length > 0 && (
                 <div>
                   <label className="block text-xs font-heading font-medium text-slate-600 mb-1">
-                    เลือกแท็บแผ่นงาน (Sheet Tab) ที่ต้องการดึงข้อมูล
+                    เลือกแท็บแผ่นงาน (Sheet Tab) สำหรับบันทึกรายการรายจ่าย
                   </label>
                   <select
                     value={connection.selectedSheetTitle}
@@ -168,10 +168,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
               <div className="flex items-center justify-between pt-2">
                 <span className="text-xs text-slate-500">
-                  รูปแบบที่ตรวจพบ:{' '}
-                  {connection.detectedFormat === 'matrix'
-                    ? 'ตารางงบประมาณรายเดือน (40-30-20-10)'
-                    : 'ตารางบันทึกรายการรับ-จ่าย (Transaction Log)'}
+                  พร้อมบันทึกข้อมูลเข้าแท็บ &ldquo;{connection.selectedSheetTitle}&rdquo;
                 </span>
                 <button
                   type="button"
@@ -184,26 +181,18 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
             </div>
           )}
 
-          {/* Supported Formats Guide */}
+          {/* Export Structure Guide */}
           <div className="pt-4 border-t border-slate-100 text-xs text-slate-600 space-y-1.5">
             <div className="font-heading font-semibold text-slate-800">
-              รูปแบบตาราง Google Sheets ที่ระบบรองรับอัตโนมัติ:
+              ข้อมูลที่จะถูกบันทึกเข้า Google Sheets เมื่อกดบันทึก:
             </div>
             <p>
-              1. <strong>ตารางบันทึกรายวัน (Transaction Log):</strong> มีคอลัมน์{' '}
-              <span className="font-mono text-slate-800">วันที่ / เดือน</span>,{' '}
-              <span className="font-mono text-slate-800">รายการ</span>,{' '}
-              <span className="font-mono text-slate-800">ประเภท (รายรับ/รายจ่าย)</span>,{' '}
-              <span className="font-mono text-slate-800">หมวดหมู่</span>,{' '}
-              <span className="font-mono text-slate-800">จำนวนเงิน</span>,{' '}
-              <span className="font-mono text-slate-800">สถานะ</span>
+              1. <strong>แท็บหลัก ({connection?.selectedSheetTitle || 'รายจ่าย-40-30-20-10'}):</strong>{' '}
+              รายการค่าใช้จ่าย หมวดหมู่ หมายเหตุ และยอดแต่ละเดือน
             </p>
             <p>
-              2. <strong>ตารางงบประมาณรายเดือน (Matrix):</strong> มีคอลัมน์{' '}
-              <span className="font-mono text-slate-800">รายการ</span>,{' '}
-              <span className="font-mono text-slate-800">หมายเหตุ</span>,{' '}
-              <span className="font-mono text-slate-800">หมวดหมู่</span> ตามด้วยคอลัมน์เดือน เช่น{' '}
-              <span className="font-mono text-slate-800">พ.ย. 69, ธ.ค. 69</span>
+              2. <strong>แท็บรายรับประจำเดือน &amp; สถานะชำระ:</strong>{' '}
+              เงินเดือนรอบวันที่ 14/29 รายได้เสริม ประกันสังคม กองทุนสำรองเลี้ยงชีพ รายรับสุทธิ และสถานะจ่ายบิล
             </p>
           </div>
         </div>

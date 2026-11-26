@@ -753,8 +753,35 @@ export async function writeBudgetStateToTabs(
   spreadsheetId: string,
   primarySheetTitle: string,
   state: BudgetState,
-  includeHelperTabs: boolean
-): Promise<void> {
+  includeHelperTabs: boolean,
+  existingSheetTitles?: string[]
+): Promise<SheetTabInfo[] | null> {
+  let updatedSheets: SheetTabInfo[] | null = null;
+
+  if (includeHelperTabs && Array.isArray(existingSheetTitles)) {
+    const missingTabs = ['รายรับประจำเดือน', 'สถานะชำระ'].filter(
+      (title) => title !== primarySheetTitle && !existingSheetTitles.includes(title)
+    );
+    if (missingTabs.length > 0) {
+      await googleFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+          spreadsheetId
+        )}:batchUpdate`,
+        accessToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            requests: missingTabs.map((title) => ({
+              addSheet: { properties: { title } },
+            })),
+          }),
+        }
+      );
+      const refreshedMeta = await fetchSpreadsheetMeta(accessToken, spreadsheetId);
+      updatedSheets = refreshedMeta.sheets;
+    }
+  }
+
   const expenseHeaders = ['รายการ', 'หมายเหตุ', 'หมวดหมู่', ...state.months];
   const expenseRows = state.expenses.map((exp) => [
     exp.name,
@@ -763,11 +790,16 @@ export async function writeBudgetStateToTabs(
     ...state.months.map((m) => Number(exp.amounts[m]) || 0),
   ]);
 
+  const safePrimaryRange = `'${primarySheetTitle.replace(/'/g, "''")}'!A1`;
   const dataBatch: { range: string; values: (string | number | boolean)[][] }[] = [
     {
-      range: `'${primarySheetTitle.replace(/'/g, "''")}'!A1`,
+      range: safePrimaryRange,
       values: [expenseHeaders, ...expenseRows],
     },
+  ];
+
+  const rangesToClear: string[] = [
+    `'${primarySheetTitle.replace(/'/g, "''")}'!A1:ZZ2000`,
   ];
 
   if (includeHelperTabs) {
@@ -779,6 +811,7 @@ export async function writeBudgetStateToTabs(
       'รายรับพิเศษ',
       'หักประกันสังคม',
       'หักกองทุนสำรองเลี้ยงชีพ',
+      'รายรับสุทธิ',
     ];
     const incomeRows = state.months.map((m) => {
       const inc = state.incomes[m] || {
@@ -789,16 +822,14 @@ export async function writeBudgetStateToTabs(
         socialSecurity: 0,
         providentFund: 0,
       };
+      const sal14 = Number(inc.salary) || 0;
+      const sal29 = Number(inc.salary29) || 0;
+      const side = Number(inc.side) || 0;
       const extraSum = (inc.extras || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
-      return [
-        m,
-        Number(inc.salary) || 0,
-        Number(inc.salary29) || 0,
-        Number(inc.side) || 0,
-        extraSum,
-        Number(inc.socialSecurity) || 0,
-        Number(inc.providentFund) || 0,
-      ];
+      const sso = Math.max(0, Number(inc.socialSecurity) || 0);
+      const pvd = Math.max(0, Number(inc.providentFund) || 0);
+      const netInc = sal14 + sal29 + side + extraSum - (sso + pvd);
+      return [m, sal14, sal29, side, extraSum, sso, pvd, netInc];
     });
 
     const paidHeaders = ['รายการ', ...state.months];
@@ -807,25 +838,33 @@ export async function writeBudgetStateToTabs(
       ...state.months.map((m) => (exp.paid?.[m] ? 'ชำระแล้ว' : 'รอชำระ')),
     ]);
 
-    dataBatch.push(
-      {
+    if (primarySheetTitle !== 'รายรับประจำเดือน') {
+      rangesToClear.push(`'รายรับประจำเดือน'!A1:Z2000`);
+      dataBatch.push({
         range: `'รายรับประจำเดือน'!A1`,
         values: [incomeHeaders, ...incomeRows],
-      },
-      {
+      });
+    }
+
+    if (primarySheetTitle !== 'สถานะชำระ') {
+      rangesToClear.push(`'สถานะชำระ'!A1:ZZ2000`);
+      dataBatch.push({
         range: `'สถานะชำระ'!A1`,
         values: [paidHeaders, ...paidRows],
-      }
-    );
+      });
+    }
   }
 
-  // Clear primary sheet first so deleted items don't leave trailing ghost rows
+  // Clear target ranges first so deleted items/months don't leave trailing ghost rows
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
-    )}/values/${encodeURIComponent(`'${primarySheetTitle.replace(/'/g, "''")}'!A1:ZZ2000`)}:clear`,
+    )}/values:batchClear`,
     accessToken,
-    { method: 'POST', body: JSON.stringify({}) }
+    {
+      method: 'POST',
+      body: JSON.stringify({ ranges: rangesToClear }),
+    }
   );
 
   await googleFetch(
@@ -841,6 +880,8 @@ export async function writeBudgetStateToTabs(
       }),
     }
   );
+
+  return updatedSheets;
 }
 
 declare global {

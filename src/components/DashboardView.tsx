@@ -718,7 +718,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 กราฟแนวโน้มรายรับ-รายจ่าย และกระแสเงินสดสุทธิ
               </h2>
               <p className="text-xs text-slate-500">
-                อัปเดตอัตโนมัติแบบเรียลไทม์ตามข้อมูลจาก Google Sheets และรายการที่บันทึก
+                อัปเดตอัตโนมัติแบบเรียลไทม์ตามรายการรับ-จ่ายที่คุณบันทึก
               </p>
             </div>
           </div>
