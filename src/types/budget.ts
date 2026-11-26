@@ -37,13 +37,48 @@ export interface ExpenseItem {
   recurringEndMonth?: string;
 }
 
-export type ActiveTab = 'dashboard' | 'transactions' | 'projection';
+export type ActiveTab = 'dashboard' | 'transactions' | 'cards' | 'projection';
 
 export interface TargetPercentages {
   essential: number;
   debt: number;
   savings: number;
   personal: number;
+}
+
+export type CreditCardId =
+  | 'bluecard'
+  | 'kbank1'
+  | 'kbank2'
+  | 'ktc'
+  | 'central1'
+  | 'central2';
+
+export type CreditCardBalanceMode = 'schedule' | 'custom';
+
+export interface CreditCardInstallment {
+  id: string;
+  itemName: string;
+  totalPrice: number;
+  totalMonths: number;
+  monthlyAmount: number;
+  paidMonths: number;
+  startMonth?: string;
+  isZeroInterest: boolean;
+  deductFromLimit?: boolean;
+  syncedToSchedule?: boolean;
+  paidScheduleMonths?: string[];
+}
+
+export interface CreditCardConfig {
+  id: CreditCardId;
+  name: string;
+  issuerLabel: string;
+  creditLimit: number;
+  balanceMode: CreditCardBalanceMode;
+  customBalance: number;
+  accentColor: string;
+  installments?: CreditCardInstallment[];
 }
 
 export interface BudgetState {
@@ -53,6 +88,7 @@ export interface BudgetState {
   incomes: Record<string, MonthIncome>;
   expenses: ExpenseItem[];
   targetPercentages?: TargetPercentages;
+  creditCards?: CreditCardConfig[];
 }
 
 export interface MonthExpenseView extends ExpenseItem {

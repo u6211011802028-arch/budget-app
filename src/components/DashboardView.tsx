@@ -21,6 +21,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  CreditCard,
   RotateCcw,
   SlidersHorizontal,
   TrendingDown,
@@ -32,10 +33,13 @@ import {
   DEFAULT_TARGET_PERCENTAGES,
   ESSENTIAL_SUBCATEGORIES,
   RECOVERY_ROADMAP,
+  computeAllCreditCardMetrics,
+  extractBlueCardFuelAmountForMonth,
   fmt,
   fmtCompact,
   getMonthExpenses,
   getMonthIncome,
+  isBlueCardExpenseName,
   resolveEssentialSubcategory,
   resolveTargetPercentages,
 } from '../data/defaultBudget';
@@ -45,6 +49,7 @@ interface DashboardViewProps {
   onTogglePaid: (expenseId: number) => void;
   onOpenIncomeModal: () => void;
   onSwitchToTransactions: () => void;
+  onSwitchToCards?: () => void;
   onUpdateTargetPercentages: (next: TargetPercentages) => void;
   onSelectMonth?: (month: string) => void;
 }
@@ -56,6 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onTogglePaid,
   onOpenIncomeModal,
   onSwitchToTransactions,
+  onSwitchToCards,
   onUpdateTargetPercentages,
   onSelectMonth,
 }) => {
@@ -140,6 +146,64 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const net = incData.total - totalExpense;
   const expPct = incData.total > 0 ? (totalExpense / incData.total) * 100 : 0;
+
+  const blueCardFuelInMonth = useMemo(() => {
+    const bc = exps.find((e) => isBlueCardExpenseName(e.name));
+    if (!bc) return 0;
+    return extractBlueCardFuelAmountForMonth(bc.note, m);
+  }, [exps, m]);
+
+  const cardOverview = useMemo(() => {
+    const metrics = computeAllCreditCardMetrics(state);
+    const sharedMetrics = metrics.filter((c) => c.isSharedLimit);
+    const individualMetrics = metrics.filter((c) => !c.isSharedLimit);
+
+    const sharedLimit = sharedMetrics[0]?.creditLimit || 0;
+    const sharedUsed = sharedMetrics[0]?.sharedUsedTotal || 0;
+    const sharedAvailable =
+      sharedLimit > 0 ? Math.round((sharedLimit - sharedUsed) * 100) / 100 : 0;
+    const sharedPct = sharedLimit > 0 ? (sharedUsed / sharedLimit) * 100 : 0;
+
+    const configuredCount = metrics.filter((c) => c.creditLimit > 0).length;
+    const totalLimit =
+      sharedLimit + individualMetrics.reduce((s, c) => s + c.creditLimit, 0);
+    const totalUsed = metrics.reduce((s, c) => s + c.usedAmount, 0);
+    const totalAvailable =
+      (sharedLimit > 0 ? sharedAvailable : 0) +
+      individualMetrics
+        .filter((c) => c.creditLimit > 0)
+        .reduce((s, c) => s + c.availableLimit, 0);
+
+    const activeInstallmentsCount = metrics.reduce(
+      (s, c) => s + c.activeInstallmentsCount,
+      0
+    );
+    const installmentsMonthlyTotal = metrics.reduce(
+      (s, c) => s + c.installmentsMonthlyTotal,
+      0
+    );
+    const monthDueTotal = metrics.reduce((s, c) => s + c.activeMonthPayment, 0);
+    const alertCards = metrics.filter(
+      (c) =>
+        c.creditLimit > 0 && (c.utilizationPct >= 75 || c.availableLimit < 0)
+    );
+
+    return {
+      metrics,
+      configuredCount,
+      totalLimit,
+      totalUsed,
+      totalAvailable,
+      sharedLimit,
+      sharedUsed,
+      sharedAvailable,
+      sharedPct,
+      activeInstallmentsCount,
+      installmentsMonthlyTotal,
+      monthDueTotal,
+      alertCards,
+    };
+  }, [state]);
 
   // ค่าใช้จ่ายจำเป็น (40%) · ภาระผ่อนหนี้ (30%) · เงินออม + ลงทุน (20%) · เงินใช้ส่วนตัว (10%)
   const proportionAudit = useMemo(() => {
@@ -247,7 +311,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       makeItem(
         'debt',
         'ภาระผ่อนหนี้',
-        'ผ่อนชำระหนี้สินและบัตรเครดิต',
+        blueCardFuelInMonth > 0
+          ? `ผ่อนชำระหนี้และบัตร (รวมค่าน้ำมันบัตรบรูการ์ด ฿${fmtCompact(blueCardFuelInMonth)})`
+          : 'ผ่อนชำระหนี้สินและบัตรเครดิต',
         targets.debt,
         debtAmt,
         'max-cap'
@@ -277,7 +343,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       items,
       matchedCount,
     };
-  }, [exps, incData.total, totalExpense, proportionBasis, targets]);
+  }, [exps, incData.total, totalExpense, proportionBasis, targets, blueCardFuelInMonth]);
 
   // Monthly Trend Data for Real-time ComposedChart
   const monthlyTrendData = useMemo(() => {
@@ -1073,6 +1139,212 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* 6-Card Credit Card & Shared Pool Overview */}
+      <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-[#006A63] shrink-0" />
+              <h2 className="text-base sm:text-lg font-heading font-bold text-slate-900">
+                ภาพรวมบัตรเครดิตและวงเงินคงเหลือ (6 ใบ)
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              เชื่อมโยงยอดใช้จริง ผ่อน 0% คงค้าง และวงเงินร่วมบัตร 1–3 · ประจำเดือน {m}
+            </p>
+          </div>
+          {onSwitchToCards && (
+            <button
+              type="button"
+              onClick={onSwitchToCards}
+              className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-[#006A63] hover:underline self-start sm:self-auto whitespace-nowrap shrink-0"
+            >
+              <span>จัดการบัตรเครดิต</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* 4-Column Portfolio Strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
+          <div className="p-3.5 sm:p-4 bg-slate-50/60">
+            <div className="text-[11px] font-heading font-medium text-slate-500">
+              วงเงินรวม (6 บัตร)
+            </div>
+            <div className="text-lg sm:text-xl font-num font-bold text-slate-900 mt-1">
+              {cardOverview.totalLimit > 0
+                ? `฿${fmt(cardOverview.totalLimit)}`
+                : 'ยังไม่ตั้งวงเงิน'}
+            </div>
+            <div className="text-[11px] font-num text-slate-500 mt-1">
+              ตั้งวงเงินแล้ว {cardOverview.configuredCount} / 6 ใบ
+            </div>
+          </div>
+
+          <div className="p-3.5 sm:p-4 bg-white">
+            <div className="text-[11px] font-heading font-medium text-slate-500">
+              ยอดใช้รวมทั้งหมด
+            </div>
+            <div className="text-lg sm:text-xl font-num font-bold text-slate-900 mt-1">
+              ฿{fmt(cardOverview.totalUsed)}
+            </div>
+            <div className="text-[11px] font-num text-slate-500 mt-1">
+              บิลรอบเดือน {m}: ฿{fmtCompact(cardOverview.monthDueTotal)}
+            </div>
+          </div>
+
+          <div className="p-3.5 sm:p-4 bg-[#E6F3F2]/40">
+            <div className="text-[11px] font-heading font-medium text-[#006A63]">
+              คงเหลือใช้ได้รวม
+            </div>
+            <div
+              className={`text-lg sm:text-xl font-num font-bold mt-1 ${
+                cardOverview.totalAvailable < 0
+                  ? 'text-rose-700'
+                  : 'text-[#006A63]'
+              }`}
+            >
+              {cardOverview.totalLimit > 0
+                ? `${cardOverview.totalAvailable < 0 ? '-฿' : '฿'}${fmt(
+                    Math.abs(cardOverview.totalAvailable)
+                  )}`
+                : '—'}
+            </div>
+            <div className="text-[11px] font-num text-slate-600 mt-1">
+              {cardOverview.sharedLimit > 0
+                ? `วงเงินร่วม 1–3 เหลือ ฿${fmtCompact(cardOverview.sharedAvailable)}`
+                : 'บัตร 1–3 ใช้วงเงินร่วมกัน'}
+            </div>
+          </div>
+
+          <div className="p-3.5 sm:p-4 bg-white">
+            <div className="text-[11px] font-heading font-medium text-slate-500">
+              ผ่อน 0% ต่อเดือน
+            </div>
+            <div className="text-lg sm:text-xl font-num font-bold text-slate-900 mt-1">
+              ฿{fmt(cardOverview.installmentsMonthlyTotal)}
+            </div>
+            <div className="text-[11px] font-num text-slate-500 mt-1">
+              {cardOverview.activeInstallmentsCount > 0
+                ? `${cardOverview.activeInstallmentsCount} รายการที่กำลังผ่อน`
+                : 'ยังไม่มีรายการผ่อน 0%'}
+            </div>
+          </div>
+        </div>
+
+        {/* Shared Pool Alert / High Utilization Notice */}
+        {(cardOverview.sharedPct >= 75 || cardOverview.alertCards.length > 0) && (
+          <div
+            className={`px-3.5 py-2.5 rounded-lg border text-xs flex flex-wrap items-center justify-between gap-2 ${
+              cardOverview.sharedAvailable < 0 ||
+              cardOverview.alertCards.some((c) => c.availableLimit < 0)
+                ? 'bg-rose-50/80 border-rose-200 text-rose-800'
+                : 'bg-amber-50/80 border-amber-200 text-amber-800'
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span className="font-heading">
+                {cardOverview.sharedPct >= 75
+                  ? `วงเงินร่วมบัตร 1–3 ใช้ไปแล้ว ${cardOverview.sharedPct.toFixed(0)}% (เหลือ ฿${fmtCompact(
+                      cardOverview.sharedAvailable
+                    )})`
+                  : `มี ${cardOverview.alertCards.length} บัตรที่ใช้วงเงินตั้งแต่ 75% ขึ้นไป`}
+                {cardOverview.alertCards.length > 0 &&
+                  ` · ${cardOverview.alertCards
+                    .map(
+                      (c) =>
+                        `${c.card.name} (${
+                          c.availableLimit < 0
+                            ? 'เกินวงเงิน'
+                            : `${c.utilizationPct.toFixed(0)}%`
+                        })`
+                    )
+                    .join(', ')}`}
+              </span>
+            </div>
+            {onSwitchToCards && (
+              <button
+                type="button"
+                onClick={onSwitchToCards}
+                className="font-heading font-semibold underline whitespace-nowrap shrink-0"
+              >
+                ตรวจสอบวงเงิน
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Compact 6-Card Mini Status Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {cardOverview.metrics.map((cm) => {
+            const hasLimit = cm.creditLimit > 0;
+            const isOver = hasLimit && cm.availableLimit < 0;
+            const isHigh = hasLimit && !isOver && cm.utilizationPct >= 75;
+            const fillPct = hasLimit ? Math.min(100, Math.max(0, cm.utilizationPct)) : 0;
+
+            return (
+              <div
+                key={cm.card.id}
+                className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/40 flex flex-col justify-between gap-1.5"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-heading font-semibold text-slate-800 truncate">
+                    {cm.card.name}
+                  </span>
+                  {cm.isSharedLimit && (
+                    <span className="text-[10px] font-heading text-slate-400 shrink-0">
+                      ร่วม 1–3
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-baseline justify-between gap-1 text-[11px] font-num">
+                    <span className="font-semibold text-slate-900">
+                      ใช้ ฿{fmtCompact(cm.usedAmount)}
+                    </span>
+                    <span
+                      className={
+                        isOver
+                          ? 'text-rose-700 font-semibold'
+                          : isHigh
+                          ? 'text-amber-700 font-semibold'
+                          : 'text-slate-500'
+                      }
+                    >
+                      {hasLimit ? `${cm.utilizationPct.toFixed(0)}%` : '—'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden mt-1">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        isOver
+                          ? 'bg-rose-600'
+                          : isHigh
+                          ? 'bg-amber-500'
+                          : 'bg-[#006A63]'
+                      }`}
+                      style={{ width: `${fillPct}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-num text-slate-500 truncate">
+                  {hasLimit
+                    ? isOver
+                      ? `เกิน ฿${fmtCompact(Math.abs(cm.availableLimit))}`
+                      : `เหลือ ฿${fmtCompact(cm.availableLimit)}`
+                    : cm.activeMonthPayment > 0
+                    ? `เดือนนี้ ฿${fmtCompact(cm.activeMonthPayment)}`
+                    : 'ยังไม่ตั้งวงเงิน'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Real-Time Interactive Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Monthly Income vs Expense & Net Cashflow Chart */}
@@ -1524,7 +1796,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <React.Fragment key={cat.name}>
                     <tr className="hover:bg-slate-50/70">
                       <td className="py-2.5 pr-2 font-medium text-slate-800">
-                        {cat.name}
+                        <span>{cat.name}</span>
+                        {cat.key === 'debt' && blueCardFuelInMonth > 0 && (
+                          <div className="text-[11px] font-normal text-slate-500 mt-0.5">
+                            รวมค่าน้ำมันเข้าบัตรบรูการ์ด ฿{fmtCompact(blueCardFuelInMonth)}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 px-2 text-right font-num text-slate-600">
                         ฿{fmt(cat.targetAmt)}

@@ -1,15 +1,23 @@
 import {
   BudgetCategory,
   BudgetState,
+  CreditCardBalanceMode,
+  CreditCardConfig,
+  CreditCardInstallment,
   EssentialSubcategory,
   ExpenseItem,
   ExtraIncomeItem,
   MonthIncome,
   SheetTabInfo,
+  TargetPercentages,
 } from '../types/budget';
 import {
   BUDGET_CATEGORIES,
+  DEFAULT_TARGET_PERCENTAGES,
+  resolveCreditCards,
   resolveEssentialSubcategory,
+  resolveTargetPercentages,
+  sanitizeInstallments,
 } from '../data/defaultBudget';
 
 export class AuthExpiredError extends Error {
@@ -316,11 +324,186 @@ export interface ParsedSheetResult {
   rowCount: number;
 }
 
+function parseCreditCardsTabRows(
+  creditCardTabRows: string[][] | null | undefined,
+  previousState: BudgetState
+): CreditCardConfig[] {
+  const base = resolveCreditCards(previousState.creditCards);
+  if (!creditCardTabRows || creditCardTabRows.length < 2) return base;
+  const rows = creditCardTabRows.slice(1);
+  const parsed = base.map((card) => {
+    const match = rows.find((r) => {
+      const idCell = String(r[0] || '').trim();
+      const nameCell = String(r[1] || '').trim();
+      return idCell === card.id || nameCell === card.name;
+    });
+    if (!match) return card;
+    const limit = Math.max(0, parseNumericCell(match[2]));
+    const modeRaw = String(match[3] || '').trim().toLowerCase();
+    const balanceMode: CreditCardBalanceMode =
+      modeRaw === 'custom' || modeRaw.includes('กำหนดเอง')
+        ? 'custom'
+        : 'schedule';
+    const customBalance = Math.max(0, parseNumericCell(match[4]));
+    let installments: CreditCardInstallment[] = card.installments || [];
+    const rawJson = String(match[6] || '').trim();
+    if (rawJson.startsWith('[')) {
+      try {
+        installments = sanitizeInstallments(JSON.parse(rawJson));
+      } catch {
+        // Keep previous installments if JSON column is malformed
+      }
+    }
+    return {
+      ...card,
+      creditLimit: limit,
+      balanceMode,
+      customBalance,
+      installments,
+    };
+  });
+  return resolveCreditCards(parsed);
+}
+
+interface ParsedSettingsTab {
+  targetPercentages: TargetPercentages;
+  activeMonth?: string;
+  recurringEndMonths: Record<string, string>;
+}
+
+function parseSettingsTabRows(
+  settingsTabRows: string[][] | null | undefined,
+  previousState: BudgetState
+): ParsedSettingsTab {
+  const baseTargets = resolveTargetPercentages(previousState.targetPercentages);
+  const recurringEndMonths: Record<string, string> = {};
+  previousState.expenses.forEach((exp) => {
+    if (exp.recurringEndMonth) {
+      recurringEndMonths[exp.name] = exp.recurringEndMonth;
+    }
+  });
+
+  if (!settingsTabRows || settingsTabRows.length < 2) {
+    return {
+      targetPercentages: baseTargets,
+      recurringEndMonths,
+    };
+  }
+
+  const map = new Map<string, string>();
+  settingsTabRows.slice(1).forEach((row) => {
+    const key = String(row[0] || '').trim();
+    if (key) {
+      map.set(key, String(row[2] ?? '').trim());
+    }
+  });
+
+  const pickPct = (key: string, fallback: number) => {
+    if (!map.has(key)) return fallback;
+    const raw = map.get(key) || '';
+    if (!raw) return fallback;
+    const n = parseNumericCell(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 100
+      ? Math.round(n * 10) / 10
+      : fallback;
+  };
+
+  const targetPercentages: TargetPercentages = resolveTargetPercentages({
+    essential: pickPct('target_essential', baseTargets.essential),
+    debt: pickPct('target_debt', baseTargets.debt),
+    savings: pickPct('target_savings', baseTargets.savings),
+    personal: pickPct('target_personal', baseTargets.personal),
+  });
+
+  let activeMonth: string | undefined;
+  const rawActive = map.get('active_month');
+  if (rawActive) {
+    activeMonth = normalizeMonthLabel(rawActive) || rawActive;
+  }
+
+  const rawEndMap = map.get('recurring_end_months');
+  if (rawEndMap && rawEndMap.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(rawEndMap);
+      if (parsed && typeof parsed === 'object') {
+        Object.entries(parsed).forEach(([k, v]) => {
+          if (typeof v === 'string' && v.trim()) {
+            recurringEndMonths[k] = v.trim();
+          }
+        });
+      }
+    } catch {
+      // Keep previous recurringEndMonths if malformed
+    }
+  }
+
+  return {
+    targetPercentages,
+    activeMonth,
+    recurringEndMonths,
+  };
+}
+
+function mergeIncomeTabRows(
+  incomes: Record<string, MonthIncome>,
+  incomeTabRows: string[][] | null
+) {
+  if (!incomeTabRows || incomeTabRows.length < 2) return;
+  const incHeader = incomeTabRows[0].map((h) => String(h || '').trim().toLowerCase());
+  const mCol = incHeader.findIndex((h) => h.includes('เดือน') || h.includes('month'));
+  const sal29Col = incHeader.findIndex(
+    (h) => (h.includes('เงินเดือน') || h.includes('salary')) && h.includes('29')
+  );
+  const salCol = incHeader.findIndex(
+    (h) => (h.includes('เงินเดือน') || h.includes('salary')) && !h.includes('29')
+  );
+  const sideCol = incHeader.findIndex((h) => h.includes('เสริม') || h.includes('side') || h.includes('ot'));
+  const extraCol = incHeader.findIndex((h) => h.includes('พิเศษ') || h.includes('extra'));
+  const ssoCol = incHeader.findIndex(
+    (h) => h.includes('ประกันสังคม') || h.includes('sso') || h.includes('social')
+  );
+  const pvdCol = incHeader.findIndex(
+    (h) =>
+      h.includes('สำรองเลี้ยงชีพ') ||
+      h.includes('กองทุน') ||
+      h.includes('pvd') ||
+      h.includes('provident')
+  );
+
+  incomeTabRows.slice(1).forEach((row) => {
+    const mLabel = normalizeMonthLabel(row[mCol >= 0 ? mCol : 0] || '');
+    if (!mLabel) return;
+    if (!incomes[mLabel]) {
+      incomes[mLabel] = {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
+      };
+    }
+    if (salCol >= 0) incomes[mLabel].salary = parseNumericCell(row[salCol]);
+    if (sal29Col >= 0) incomes[mLabel].salary29 = parseNumericCell(row[sal29Col]);
+    if (sideCol >= 0) incomes[mLabel].side = parseNumericCell(row[sideCol]);
+    if (ssoCol >= 0) incomes[mLabel].socialSecurity = Math.max(0, parseNumericCell(row[ssoCol]));
+    if (pvdCol >= 0) incomes[mLabel].providentFund = Math.max(0, parseNumericCell(row[pvdCol]));
+    if (extraCol >= 0) {
+      const extraAmt = parseNumericCell(row[extraCol]);
+      if (extraAmt > 0) {
+        incomes[mLabel].extras = [{ name: 'รายรับพิเศษ (จาก Sheet)', amount: extraAmt }];
+      }
+    }
+  });
+}
+
 export function parseGoogleSheetsToBudget(
   primaryRows: string[][],
   incomeTabRows: string[][] | null,
   paidTabRows: string[][] | null,
-  previousState: BudgetState
+  previousState: BudgetState,
+  creditCardTabRows?: string[][] | null,
+  settingsTabRows?: string[][] | null
 ): ParsedSheetResult {
   if (!primaryRows || primaryRows.length < 2) {
     throw new Error('ไม่พบข้อมูลในแผ่นงานที่เลือก (ต้องมีแถวหัวตารางอย่างน้อย 1 แถวและข้อมูล 1 แถว)');
@@ -346,18 +529,42 @@ export function parseGoogleSheetsToBudget(
     }
   });
 
-  if (monthColumns.length >= 2) {
-    return parseMatrixFormat(
-      headers,
-      dataRows,
-      monthColumns,
-      incomeTabRows,
-      paidTabRows,
-      previousState
-    );
-  }
+  const resolvedCards = parseCreditCardsTabRows(creditCardTabRows, previousState);
+  const parsedSettings = parseSettingsTabRows(settingsTabRows, previousState);
 
-  return parseTransactionLogFormat(headers, dataRows, previousState);
+  const res =
+    monthColumns.length >= 2
+      ? parseMatrixFormat(
+          headers,
+          dataRows,
+          monthColumns,
+          incomeTabRows,
+          paidTabRows,
+          previousState
+        )
+      : parseTransactionLogFormat(
+          headers,
+          dataRows,
+          incomeTabRows,
+          paidTabRows,
+          previousState
+        );
+
+  res.state.creditCards = resolvedCards;
+  res.state.targetPercentages = parsedSettings.targetPercentages;
+  if (
+    parsedSettings.activeMonth &&
+    res.state.months.includes(parsedSettings.activeMonth)
+  ) {
+    res.state.activeMonth = parsedSettings.activeMonth;
+  }
+  res.state.expenses = res.state.expenses.map((exp) => {
+    const endMon = parsedSettings.recurringEndMonths[exp.name];
+    return endMon && !exp.recurringEndMonth
+      ? { ...exp, recurringEndMonth: endMon }
+      : exp;
+  });
+  return res;
 }
 
 function parseMatrixFormat(
@@ -405,54 +612,7 @@ function parseMatrixFormat(
   });
 
   // Parse optional income tab
-  if (incomeTabRows && incomeTabRows.length >= 2) {
-    const incHeader = incomeTabRows[0].map((h) => String(h || '').trim().toLowerCase());
-    const mCol = incHeader.findIndex((h) => h.includes('เดือน') || h.includes('month'));
-    const sal29Col = incHeader.findIndex(
-      (h) => (h.includes('เงินเดือน') || h.includes('salary')) && h.includes('29')
-    );
-    const salCol = incHeader.findIndex(
-      (h) => (h.includes('เงินเดือน') || h.includes('salary')) && !h.includes('29')
-    );
-    const sideCol = incHeader.findIndex((h) => h.includes('เสริม') || h.includes('side') || h.includes('ot'));
-    const extraCol = incHeader.findIndex((h) => h.includes('พิเศษ') || h.includes('extra'));
-    const ssoCol = incHeader.findIndex(
-      (h) => h.includes('ประกันสังคม') || h.includes('sso') || h.includes('social')
-    );
-    const pvdCol = incHeader.findIndex(
-      (h) =>
-        h.includes('สำรองเลี้ยงชีพ') ||
-        h.includes('กองทุน') ||
-        h.includes('pvd') ||
-        h.includes('provident')
-    );
-
-    incomeTabRows.slice(1).forEach((row) => {
-      const mLabel = normalizeMonthLabel(row[mCol >= 0 ? mCol : 0] || '');
-      if (!mLabel) return;
-      if (!incomes[mLabel]) {
-        incomes[mLabel] = {
-          salary: 0,
-          salary29: 0,
-          side: 0,
-          extras: [],
-          socialSecurity: 0,
-          providentFund: 0,
-        };
-      }
-      if (salCol >= 0) incomes[mLabel].salary = parseNumericCell(row[salCol]);
-      if (sal29Col >= 0) incomes[mLabel].salary29 = parseNumericCell(row[sal29Col]);
-      if (sideCol >= 0) incomes[mLabel].side = parseNumericCell(row[sideCol]);
-      if (ssoCol >= 0) incomes[mLabel].socialSecurity = Math.max(0, parseNumericCell(row[ssoCol]));
-      if (pvdCol >= 0) incomes[mLabel].providentFund = Math.max(0, parseNumericCell(row[pvdCol]));
-      if (extraCol >= 0) {
-        const extraAmt = parseNumericCell(row[extraCol]);
-        if (extraAmt > 0) {
-          incomes[mLabel].extras = [{ name: 'รายรับพิเศษ (จาก Sheet)', amount: extraAmt }];
-        }
-      }
-    });
-  }
+  mergeIncomeTabRows(incomes, incomeTabRows);
 
   // Parse optional paid status lookup from paidTabRows (key: `${name}::${month}`)
   const paidMap: Record<string, Record<string, boolean>> = {};
@@ -592,6 +752,8 @@ function parseMatrixFormat(
 function parseTransactionLogFormat(
   headers: string[],
   dataRows: string[][],
+  incomeTabRows: string[][] | null,
+  paidTabRows: string[][] | null,
   previousState: BudgetState
 ): ParsedSheetResult {
   const lower = headers.map((h) => h.toLowerCase());
@@ -627,6 +789,24 @@ function parseTransactionLogFormat(
     );
   }
 
+  const paidMap: Record<string, Record<string, boolean>> = {};
+  if (paidTabRows && paidTabRows.length >= 2) {
+    const pHeaders = paidTabRows[0].map((h) => String(h || '').trim());
+    const pMonths: { colIdx: number; label: string }[] = [];
+    pHeaders.forEach((h, idx) => {
+      const norm = normalizeMonthLabel(h);
+      if (norm) pMonths.push({ colIdx: idx, label: norm });
+    });
+    paidTabRows.slice(1).forEach((row) => {
+      const itemName = String(row[0] || '').trim();
+      if (!itemName) return;
+      if (!paidMap[itemName]) paidMap[itemName] = {};
+      pMonths.forEach((pm) => {
+        paidMap[itemName][pm.label] = isTruthyPaid(row[pm.colIdx]);
+      });
+    });
+  }
+
   const resolvedNameCol = nameCol >= 0 ? nameCol : 0;
   const resolvedAmountCol = amountCol >= 0 ? amountCol : headers.length - 1;
   const fallbackMonth =
@@ -647,7 +827,14 @@ function parseTransactionLogFormat(
     monthsSet.add(monthLabel);
 
     if (!incomes[monthLabel]) {
-      incomes[monthLabel] = { salary: 0, salary29: 0, side: 0, extras: [] };
+      incomes[monthLabel] = {
+        salary: 0,
+        salary29: 0,
+        side: 0,
+        extras: [],
+        socialSecurity: 0,
+        providentFund: 0,
+      };
     }
 
     const rawType = typeCol >= 0 ? String(row[typeCol] || '').toLowerCase() : '';
@@ -682,7 +869,12 @@ function parseTransactionLogFormat(
         ? String(row[noteCol] || '-').trim() || '-'
         : rawDateOrMonth || '-';
     const category = mapCategory(rawCat, rawName);
-    const isPaid = statusCol >= 0 ? isTruthyPaid(row[statusCol]) : false;
+    const isPaid =
+      paidMap[rawName] && typeof paidMap[rawName][monthLabel] === 'boolean'
+        ? paidMap[rawName][monthLabel]
+        : statusCol >= 0
+        ? isTruthyPaid(row[statusCol])
+        : false;
 
     const mapKey = `${rawName}::${category}`;
     const existing = expenseMap.get(mapKey);
@@ -701,6 +893,8 @@ function parseTransactionLogFormat(
       });
     }
   });
+
+  mergeIncomeTabRows(incomes, incomeTabRows);
 
   const months = Array.from(monthsSet);
   if (months.length === 0) months.push(fallbackMonth);
@@ -764,6 +958,8 @@ export async function createBudgetTemplateSpreadsheet(
           { properties: { title: 'รายจ่าย-40-30-20-10' } },
           { properties: { title: 'รายรับประจำเดือน' } },
           { properties: { title: 'สถานะชำระ' } },
+          { properties: { title: 'บัตรเครดิต' } },
+          { properties: { title: 'ตั้งค่าระบบ' } },
         ],
       }),
     }
@@ -794,7 +990,12 @@ export async function writeBudgetStateToTabs(
   let updatedSheets: SheetTabInfo[] | null = null;
 
   if (includeHelperTabs && Array.isArray(existingSheetTitles)) {
-    const missingTabs = ['รายรับประจำเดือน', 'สถานะชำระ'].filter(
+    const missingTabs = [
+      'รายรับประจำเดือน',
+      'สถานะชำระ',
+      'บัตรเครดิต',
+      'ตั้งค่าระบบ',
+    ].filter(
       (title) => title !== primarySheetTitle && !existingSheetTitles.includes(title)
     );
     if (missingTabs.length > 0) {
@@ -893,6 +1094,74 @@ export async function writeBudgetStateToTabs(
       dataBatch.push({
         range: `'สถานะชำระ'!A1`,
         values: [paidHeaders, ...paidRows],
+      });
+    }
+
+    if (primarySheetTitle !== 'บัตรเครดิต') {
+      const cardHeaders = [
+        'รหัสบัตร',
+        'ชื่อบัตร (เชื่อมรายการจ่าย)',
+        'วงเงินที่ตั้งไว้',
+        'โหมดคำนวณยอดใช้',
+        'ยอดใช้คงเหลือ (กำหนดเอง)',
+        'รายการผ่อน 0% (สรุป)',
+        'ข้อมูลผ่อน 0% (JSON)',
+      ];
+      const cardRows = resolveCreditCards(state.creditCards).map((c) => {
+        const insts = sanitizeInstallments(c.installments);
+        const summaryText =
+          insts.length > 0
+            ? insts
+                .map(
+                  (i) =>
+                    `${i.itemName} (${i.isZeroInterest ? '0% ' : ''}${i.paidMonths}/${i.totalMonths} ด. ฿${i.monthlyAmount}/ด.)`
+                )
+                .join(' | ')
+            : '-';
+        return [
+          c.id,
+          c.name,
+          Number(c.creditLimit) || 0,
+          c.balanceMode === 'custom' ? 'กำหนดเอง' : 'ตามตารางจ่าย',
+          Number(c.customBalance) || 0,
+          summaryText,
+          JSON.stringify(insts),
+        ];
+      });
+      rangesToClear.push(`'บัตรเครดิต'!A1:H200`);
+      dataBatch.push({
+        range: `'บัตรเครดิต'!A1`,
+        values: [cardHeaders, ...cardRows],
+      });
+    }
+
+    if (primarySheetTitle !== 'ตั้งค่าระบบ') {
+      const targets = resolveTargetPercentages(
+        state.targetPercentages || DEFAULT_TARGET_PERCENTAGES
+      );
+      const recurringEndMap: Record<string, string> = {};
+      state.expenses.forEach((exp) => {
+        if (exp.recurringEndMonth) {
+          recurringEndMap[exp.name] = exp.recurringEndMonth;
+        }
+      });
+      const settingsHeaders = ['รหัสตั้งค่า', 'รายละเอียด', 'ค่าที่ตั้ง'];
+      const settingsRows: (string | number)[][] = [
+        ['target_essential', 'สัดส่วนเป้าหมาย: ค่าใช้จ่ายจำเป็น (%)', targets.essential],
+        ['target_debt', 'สัดส่วนเป้าหมาย: ภาระผ่อนหนี้ (%)', targets.debt],
+        ['target_savings', 'สัดส่วนเป้าหมาย: เงินออม + ลงทุน (%)', targets.savings],
+        ['target_personal', 'สัดส่วนเป้าหมาย: เงินใช้ส่วนตัว (%)', targets.personal],
+        ['active_month', 'เดือนที่เปิดใช้งานล่าสุด', state.activeMonth],
+        [
+          'recurring_end_months',
+          'เดือนสิ้นสุดการทำซ้ำรายรายการ (JSON)',
+          JSON.stringify(recurringEndMap),
+        ],
+      ];
+      rangesToClear.push(`'ตั้งค่าระบบ'!A1:D50`);
+      dataBatch.push({
+        range: `'ตั้งค่าระบบ'!A1`,
+        values: [settingsHeaders, ...settingsRows],
       });
     }
   }

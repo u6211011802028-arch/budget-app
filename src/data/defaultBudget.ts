@@ -1,6 +1,9 @@
 import {
   BudgetCategory,
   BudgetState,
+  CreditCardConfig,
+  CreditCardId,
+  CreditCardInstallment,
   DebtPriorityItem,
   EssentialSubcategory,
   ExpenseItem,
@@ -343,6 +346,24 @@ export function appendBlueCardFuelNote(
   return baseClean ? `${baseClean} · ${tag}` : tag;
 }
 
+export function extractBlueCardFuelAmountForMonth(
+  note: string,
+  targetMonth: string
+): number {
+  const base = String(note || '').trim();
+  if (!base || !targetMonth) return 0;
+  const escapedMonth = targetMonth.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const monthTagRegex = new RegExp(
+    `น้ำมัน\\s+${escapedMonth}:\\s*฿([\\d,]+(?:\\.\\d+)?)`
+  );
+  const match = base.match(monthTagRegex);
+  if (!match) return 0;
+  const parsed = parseFloat(match[1].replace(/,/g, ''));
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.round(parsed * 100) / 100
+    : 0;
+}
+
 export function resolveBlueCardTargetMonth(
   expenses: ExpenseItem[],
   months: string[],
@@ -379,11 +400,184 @@ export function resolveBlueCardTargetMonth(
   };
 }
 
+export const DEFAULT_CREDIT_CARDS: CreditCardConfig[] = [
+  {
+    id: 'bluecard',
+    name: 'บัตรบรูการ์ด',
+    issuerLabel: 'PTT Blue Credit Card',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#0B4F8A',
+  },
+  {
+    id: 'kbank1',
+    name: 'บัตรกสิกร1',
+    issuerLabel: 'KBank Credit Card #1',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#007A3E',
+  },
+  {
+    id: 'kbank2',
+    name: 'บัตรกสิกร2',
+    issuerLabel: 'KBank Credit Card #2',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#065F46',
+  },
+  {
+    id: 'ktc',
+    name: 'บัตรKTC',
+    issuerLabel: 'KTC Credit Card',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#9E1B32',
+  },
+  {
+    id: 'central1',
+    name: 'บัตรเซ็นทรัล1',
+    issuerLabel: 'Central The 1 #1',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#27272A',
+  },
+  {
+    id: 'central2',
+    name: 'บัตรเซ็นทรัล2',
+    issuerLabel: 'Central The 1 #2',
+    creditLimit: 0,
+    balanceMode: 'schedule',
+    customBalance: 0,
+    accentColor: '#3F3F46',
+  },
+];
+
+export const SHARED_LIMIT_CARD_IDS: CreditCardId[] = [
+  'bluecard',
+  'kbank1',
+  'kbank2',
+];
+
+export function isSharedLimitCard(id: CreditCardId): boolean {
+  return SHARED_LIMIT_CARD_IDS.includes(id);
+}
+
+export function applySharedCardLimit(
+  cards: CreditCardConfig[],
+  editedCardId: CreditCardId,
+  newLimit: number
+): CreditCardConfig[] {
+  const cleanLimit = Math.max(0, Number(newLimit) || 0);
+  const isShared = isSharedLimitCard(editedCardId);
+  return cards.map((c) => {
+    if (isShared ? isSharedLimitCard(c.id) : c.id === editedCardId) {
+      return { ...c, creditLimit: cleanLimit };
+    }
+    return c;
+  });
+}
+
+export function sanitizeInstallments(
+  items?: Partial<CreditCardInstallment>[] | null
+): CreditCardInstallment[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item) => item && String(item.itemName || '').trim() !== '')
+    .map((item, idx) => {
+      const totalMonths = Math.max(1, Math.round(Number(item.totalMonths) || 1));
+      const paidMonths = Math.min(
+        totalMonths,
+        Math.max(0, Math.round(Number(item.paidMonths) || 0))
+      );
+      const rawTotal = Math.max(0, Number(item.totalPrice) || 0);
+      const rawMonthly = Math.max(0, Number(item.monthlyAmount) || 0);
+      const monthlyAmount =
+        rawMonthly > 0
+          ? Math.round(rawMonthly * 100) / 100
+          : rawTotal > 0
+          ? Math.round((rawTotal / totalMonths) * 100) / 100
+          : 0;
+      const totalPrice =
+        rawTotal > 0
+          ? Math.round(rawTotal * 100) / 100
+          : Math.round(monthlyAmount * totalMonths * 100) / 100;
+      const paidScheduleMonths = Array.isArray(item.paidScheduleMonths)
+        ? Array.from(
+            new Set(
+              item.paidScheduleMonths
+                .map((m) => String(m || '').trim())
+                .filter(Boolean)
+            )
+          )
+        : undefined;
+      return {
+        id:
+          typeof item.id === 'string' && item.id.trim()
+            ? item.id.trim()
+            : `inst_${idx + 1}_${Date.now()}`,
+        itemName: String(item.itemName || '').trim(),
+        totalPrice,
+        totalMonths,
+        monthlyAmount,
+        paidMonths,
+        startMonth:
+          typeof item.startMonth === 'string' && item.startMonth.trim()
+            ? item.startMonth.trim()
+            : undefined,
+        isZeroInterest: item.isZeroInterest !== false,
+        deductFromLimit: item.deductFromLimit !== false,
+        syncedToSchedule: Boolean(item.syncedToSchedule),
+        ...(paidScheduleMonths && paidScheduleMonths.length > 0
+          ? { paidScheduleMonths }
+          : {}),
+      };
+    });
+}
+
+export function resolveCreditCards(
+  cards?: Partial<CreditCardConfig>[] | null
+): CreditCardConfig[] {
+  const list = Array.isArray(cards) ? cards : [];
+  const mapped = DEFAULT_CREDIT_CARDS.map((def) => {
+    const found = list.find(
+      (c) => c && (c.id === def.id || c.name === def.name)
+    );
+    return {
+      ...def,
+      creditLimit: Math.max(0, Number(found?.creditLimit) || 0),
+      balanceMode:
+        found?.balanceMode === 'custom' ? 'custom' : def.balanceMode,
+      customBalance: Math.max(0, Number(found?.customBalance) || 0),
+      accentColor:
+        typeof found?.accentColor === 'string' && found.accentColor
+          ? found.accentColor
+          : def.accentColor,
+      installments: sanitizeInstallments(found?.installments),
+    };
+  });
+
+  // Cards 1, 2, 3 share the exact same credit limit pool
+  const sharedLimits = mapped
+    .filter((c) => isSharedLimitCard(c.id))
+    .map((c) => c.creditLimit);
+  const unifiedSharedLimit = sharedLimits.reduce((max, v) => Math.max(max, v), 0);
+
+  return mapped.map((c) =>
+    isSharedLimitCard(c.id) ? { ...c, creditLimit: unifiedSharedLimit } : c
+  );
+}
+
 export const DEFAULT_BUDGET_STATE: BudgetState = {
   months: ['พ.ย. 69', 'ธ.ค. 69', 'ม.ค. 70', 'ก.พ. 70', 'มี.ค. 70', 'เม.ย. 70'],
   activeMonth: 'พ.ย. 69',
   activeTab: 'dashboard',
   targetPercentages: { ...DEFAULT_TARGET_PERCENTAGES },
+  creditCards: DEFAULT_CREDIT_CARDS.map((c) => ({ ...c })),
   incomes: {
     'พ.ย. 69': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
     'ธ.ค. 69': { salary: 21000, salary29: 0, side: 0, extras: [], socialSecurity: 0, providentFund: 0 },
@@ -783,3 +977,357 @@ export function buildFutureMonthSequence(
     countFromActive: idx + 1,
   }));
 }
+
+export function findLinkedCreditCardExpense(
+  card: Pick<CreditCardConfig, 'id' | 'name'>,
+  expenses: ExpenseItem[]
+): ExpenseItem | null {
+  if (card.id === 'bluecard' || isBlueCardExpenseName(card.name)) {
+    const bc = expenses.find((e) => isBlueCardExpenseName(e.name));
+    if (bc) return bc;
+  }
+  const normalize = (s: string) =>
+    String(s || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, '');
+  const targetNorm = normalize(card.name);
+  return (
+    expenses.find((e) => normalize(e.name) === targetNorm) ||
+    expenses.find((e) => normalize(e.name).includes(targetNorm)) ||
+    null
+  );
+}
+
+export function findMatchingCreditCardId(
+  cards: CreditCardConfig[],
+  expenseName: string
+): CreditCardId | null {
+  if (isBlueCardExpenseName(expenseName)) {
+    return 'bluecard';
+  }
+  const normalize = (s: string) =>
+    String(s || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, '');
+  const expNorm = normalize(expenseName);
+  if (!expNorm) return null;
+  const exact = cards.find((c) => normalize(c.name) === expNorm);
+  if (exact) return exact.id;
+  const partial = cards.find((c) => expNorm.includes(normalize(c.name)));
+  return partial ? partial.id : null;
+}
+
+export interface ComputedInstallmentView extends CreditCardInstallment {
+  remainingMonths: number;
+  remainingBalance: number;
+  estimatedEndMonth: string | null;
+}
+
+export interface ComputedCreditCardMetrics {
+  card: CreditCardConfig;
+  linkedExpense: ExpenseItem | null;
+  activeMonthPayment: number;
+  referenceMonthlyPayment: number;
+  isActiveMonthPaid: boolean;
+  creditLimit: number;
+  generalUsedAmount: number;
+  installmentsDeductedTotal: number;
+  usedAmount: number;
+  isSharedLimit: boolean;
+  sharedUsedTotal: number;
+  otherSharedUsedAmount: number;
+  availableLimit: number;
+  utilizationPct: number;
+  ownUtilizationPct: number;
+  paidToDateAmount: number;
+  remainingMonths: number | null;
+  estimatedEndMonth: string | null;
+  hasInfiniteOrOpenEnd: boolean;
+  installments: ComputedInstallmentView[];
+  activeInstallmentsCount: number;
+  installmentsMonthlyTotal: number;
+  installmentsRemainingTotal: number;
+  installmentsMaxRemainingMonths: number;
+}
+
+function computeSingleCardBaseMetrics(
+  card: CreditCardConfig,
+  state: BudgetState
+): ComputedCreditCardMetrics {
+  const linkedExpense = findLinkedCreditCardExpense(card, state.expenses);
+  const m = state.activeMonth;
+  const activeMonthPayment = linkedExpense
+    ? Number(linkedExpense.amounts?.[m]) || 0
+    : 0;
+  const isActiveMonthPaid = !!(linkedExpense?.paid?.[m]);
+
+  const extendedSeq = buildFutureMonthSequence(
+    state.months,
+    state.months[0] || m,
+    36
+  );
+
+  // Build ordered list of months that exist in state.months or have non-zero entries in linkedExpense.amounts
+  const orderedMonths: string[] = [];
+  const seen = new Set<string>();
+  extendedSeq.forEach((item) => {
+    const hasAmt =
+      linkedExpense &&
+      Object.prototype.hasOwnProperty.call(linkedExpense.amounts || {}, item.month);
+    if (item.isExisting || hasAmt) {
+      orderedMonths.push(item.month);
+      seen.add(item.month);
+    }
+  });
+  if (linkedExpense) {
+    Object.keys(linkedExpense.amounts || {}).forEach((k) => {
+      if (!seen.has(k)) orderedMonths.push(k);
+    });
+  }
+
+  let latestNonZeroAmount = 0;
+  let paidToDateAmount = 0;
+  const unpaidScheduled: { month: string; amount: number }[] = [];
+
+  if (linkedExpense) {
+    orderedMonths.forEach((mon) => {
+      const amt = Number(linkedExpense.amounts?.[mon]) || 0;
+      if (amt > 0) {
+        latestNonZeroAmount = amt;
+        if (linkedExpense.paid?.[mon]) {
+          paidToDateAmount += amt;
+        } else {
+          unpaidScheduled.push({ month: mon, amount: amt });
+        }
+      }
+    });
+  }
+
+  // Compute installment breakdown views first so they factor into usedAmount & payoff forecast
+  const rawInstallments = sanitizeInstallments(card.installments);
+  const installments: ComputedInstallmentView[] = rawInstallments.map((inst) => {
+    const remMonths = Math.max(0, inst.totalMonths - inst.paidMonths);
+    const remBal =
+      remMonths === 0
+        ? 0
+        : inst.totalPrice > 0
+        ? Math.max(
+            0,
+            Math.round((inst.totalPrice - inst.monthlyAmount * inst.paidMonths) * 100) /
+              100
+          )
+        : Math.round(inst.monthlyAmount * remMonths * 100) / 100;
+
+    let instEndMonth: string | null = null;
+    if (remMonths > 0) {
+      const baseMon = inst.startMonth || m;
+      const seqFromStart = buildFutureMonthSequence(
+        state.months,
+        baseMon,
+        remMonths + 6
+      );
+      instEndMonth = seqFromStart[remMonths - 1]?.month || null;
+    }
+    return {
+      ...inst,
+      remainingMonths: remMonths,
+      remainingBalance: remBal,
+      estimatedEndMonth: instEndMonth,
+    };
+  });
+
+  const activeInsts = installments.filter((i) => i.remainingMonths > 0);
+  const installmentsMonthlyTotal =
+    Math.round(
+      activeInsts.reduce((sum, i) => sum + i.monthlyAmount, 0) * 100
+    ) / 100;
+  const installmentsRemainingTotal =
+    Math.round(
+      activeInsts.reduce((sum, i) => sum + i.remainingBalance, 0) * 100
+    ) / 100;
+  const installmentsMaxRemainingMonths = activeInsts.reduce(
+    (max, i) => Math.max(max, i.remainingMonths),
+    0
+  );
+  const installmentsDeductedTotal =
+    Math.round(
+      activeInsts
+        .filter((i) => i.deductFromLimit !== false)
+        .reduce((sum, i) => sum + i.remainingBalance, 0) * 100
+    ) / 100;
+  const nonSyncedInstallmentsRemaining =
+    Math.round(
+      activeInsts
+        .filter((i) => i.deductFromLimit !== false && !i.syncedToSchedule)
+        .reduce((sum, i) => sum + i.remainingBalance, 0) * 100
+    ) / 100;
+  const syncedInstallmentsRemaining = Math.max(
+    0,
+    Math.round(
+      (installmentsDeductedTotal - nonSyncedInstallmentsRemaining) * 100
+    ) / 100
+  );
+
+  const referenceMonthlyPayment =
+    activeMonthPayment > 0
+      ? activeMonthPayment
+      : latestNonZeroAmount > 0
+      ? latestNonZeroAmount
+      : installmentsMonthlyTotal;
+
+  const creditLimit = Math.max(0, Number(card.creditLimit) || 0);
+  const scheduleUsed =
+    Math.round(
+      unpaidScheduled.reduce((sum, item) => sum + item.amount, 0) * 100
+    ) / 100;
+  const generalUsedAmount =
+    card.balanceMode === 'custom'
+      ? Math.max(0, Number(card.customBalance) || 0)
+      : Math.max(
+          0,
+          Math.round((scheduleUsed - syncedInstallmentsRemaining) * 100) / 100
+        );
+  const usedAmount =
+    card.balanceMode === 'custom'
+      ? Math.round((generalUsedAmount + installmentsDeductedTotal) * 100) / 100
+      : Math.round((scheduleUsed + nonSyncedInstallmentsRemaining) * 100) / 100;
+
+  const availableLimit =
+    creditLimit > 0 ? Math.round((creditLimit - usedAmount) * 100) / 100 : 0;
+  const utilizationPct = creditLimit > 0 ? (usedAmount / creditLimit) * 100 : 0;
+
+  let remainingMonths: number | null = null;
+  let estimatedEndMonth: string | null = null;
+  let hasInfiniteOrOpenEnd = false;
+
+  if (usedAmount <= 0) {
+    remainingMonths = 0;
+    estimatedEndMonth = null;
+  } else if (card.balanceMode === 'schedule') {
+    remainingMonths = unpaidScheduled.length;
+    estimatedEndMonth =
+      unpaidScheduled.length > 0
+        ? unpaidScheduled[unpaidScheduled.length - 1].month
+        : null;
+    // Detect if the last month of state.months still has an ongoing recurring balance with no recurringEndMonth
+    const lastExistingMonth = state.months[state.months.length - 1];
+    const lastExistingAmt = linkedExpense
+      ? Number(linkedExpense.amounts?.[lastExistingMonth]) || 0
+      : 0;
+    if (
+      linkedExpense &&
+      !linkedExpense.recurringEndMonth &&
+      lastExistingAmt > 0 &&
+      estimatedEndMonth === lastExistingMonth
+    ) {
+      hasInfiniteOrOpenEnd = true;
+    }
+    if (installmentsMaxRemainingMonths > (remainingMonths || 0)) {
+      const longestInst = activeInsts.reduce<ComputedInstallmentView | null>(
+        (best, cur) =>
+          !best || cur.remainingMonths > best.remainingMonths ? cur : best,
+        null
+      );
+      if (longestInst) {
+        remainingMonths = longestInst.remainingMonths;
+        estimatedEndMonth = longestInst.estimatedEndMonth;
+        hasInfiniteOrOpenEnd = false;
+      }
+    }
+  } else {
+    if (referenceMonthlyPayment > 0) {
+      remainingMonths = Math.ceil(usedAmount / referenceMonthlyPayment);
+      const activeSeq = buildFutureMonthSequence(
+        state.months,
+        m,
+        remainingMonths + 6
+      );
+      const startIdx = isActiveMonthPaid ? 1 : 0;
+      const endEntry = activeSeq[startIdx + remainingMonths - 1];
+      estimatedEndMonth = endEntry?.month || null;
+    }
+    if (installmentsMaxRemainingMonths > (remainingMonths || 0)) {
+      const longestInst = activeInsts.reduce<ComputedInstallmentView | null>(
+        (best, cur) =>
+          !best || cur.remainingMonths > best.remainingMonths ? cur : best,
+        null
+      );
+      if (longestInst) {
+        remainingMonths = longestInst.remainingMonths;
+        estimatedEndMonth = longestInst.estimatedEndMonth;
+      }
+    }
+  }
+
+  return {
+    card,
+    linkedExpense,
+    activeMonthPayment,
+    referenceMonthlyPayment,
+    isActiveMonthPaid,
+    creditLimit,
+    generalUsedAmount,
+    installmentsDeductedTotal,
+    usedAmount,
+    isSharedLimit: isSharedLimitCard(card.id),
+    sharedUsedTotal: usedAmount,
+    otherSharedUsedAmount: 0,
+    availableLimit,
+    utilizationPct,
+    ownUtilizationPct: utilizationPct,
+    paidToDateAmount: Math.round(paidToDateAmount * 100) / 100,
+    remainingMonths,
+    estimatedEndMonth,
+    hasInfiniteOrOpenEnd,
+    installments,
+    activeInstallmentsCount: activeInsts.length,
+    installmentsMonthlyTotal,
+    installmentsRemainingTotal,
+    installmentsMaxRemainingMonths,
+  };
+}
+
+export function computeAllCreditCardMetrics(
+  state: BudgetState
+): ComputedCreditCardMetrics[] {
+  const cards = resolveCreditCards(state.creditCards);
+  const baseList = cards.map((card) => computeSingleCardBaseMetrics(card, state));
+
+  const sharedUsedSum =
+    Math.round(
+      baseList
+        .filter((m) => m.isSharedLimit)
+        .reduce((sum, m) => sum + m.usedAmount, 0) * 100
+    ) / 100;
+
+  return baseList.map((m) => {
+    if (!m.isSharedLimit) return m;
+    const otherUsed =
+      Math.round(Math.max(0, sharedUsedSum - m.usedAmount) * 100) / 100;
+    const availableLimit =
+      m.creditLimit > 0
+        ? Math.round((m.creditLimit - sharedUsedSum) * 100) / 100
+        : 0;
+    const utilizationPct =
+      m.creditLimit > 0 ? (sharedUsedSum / m.creditLimit) * 100 : 0;
+    const ownUtilizationPct =
+      m.creditLimit > 0 ? (m.usedAmount / m.creditLimit) * 100 : 0;
+    return {
+      ...m,
+      sharedUsedTotal: sharedUsedSum,
+      otherSharedUsedAmount: otherUsed,
+      availableLimit,
+      utilizationPct,
+      ownUtilizationPct,
+    };
+  });
+}
+
+export function computeCreditCardMetrics(
+  card: CreditCardConfig,
+  state: BudgetState
+): ComputedCreditCardMetrics {
+  const all = computeAllCreditCardMetrics(state);
+  return (
+    all.find((m) => m.card.id === card.id) ||
+    computeSingleCardBaseMetrics(card, state)
+  );
+}
+
+
