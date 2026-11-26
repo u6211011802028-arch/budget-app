@@ -21,7 +21,12 @@ import {
 import {
   DEFAULT_BUDGET_STATE,
   STORAGE_KEY,
+  appendBlueCardFuelNote,
   buildFutureMonthSequence,
+  fmt,
+  isBlueCardExpenseName,
+  isFuelExpenseInput,
+  resolveBlueCardTargetMonth,
   suggestNextThaiMonth,
 } from './data/defaultBudget';
 import {
@@ -639,16 +644,80 @@ export default function App() {
     setState((prev) => ({ ...prev, targetPercentages }));
   };
 
-  const handleTogglePaid = (expenseId: number) => {
+  const handleTransferFuelToBlueCard = (expenseId: number) => {
+    const m = state.activeMonth;
+    const targetExp = state.expenses.find((e) => e.id === expenseId);
+    if (!targetExp) return;
+    const fuelAmt = Number(targetExp.amounts?.[m]) || 0;
+    if (fuelAmt <= 0) return;
+
+    const preview = resolveBlueCardTargetMonth(state.expenses, state.months, m);
+    const bcName = preview.blueCardItem?.name || 'บัตรบรูการ์ด';
+    const prevBcAmt =
+      Number(preview.blueCardItem?.amounts?.[preview.targetMonth]) || 0;
+
     setState((prev) => {
-      const m = prev.activeMonth;
+      const activeM = prev.activeMonth;
+      const exp = prev.expenses.find((e) => e.id === expenseId);
+      if (!exp) return prev;
+      const amt = Number(exp.amounts?.[activeM]) || 0;
+      if (amt <= 0) return prev;
+
+      const cleanedExpenses = prev.expenses
+        .map((item) => {
+          if (item.id !== expenseId) return item;
+          return {
+            ...item,
+            amounts: { ...item.amounts, [activeM]: 0 },
+          };
+        })
+        .filter((item) =>
+          Object.values(item.amounts || {}).some((v) => (Number(v) || 0) > 0)
+        );
+
+      return applyBlueCardFuelRouting(
+        prev,
+        [activeM],
+        amt,
+        cleanedExpenses
+      );
+    });
+
+    setSyncBannerMsg(
+      preview.isDeferredToNextMonth
+        ? `ตัดยอดค่าน้ำมัน ฿${fmt(fuelAmt)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว (เนื่องจากเดือน ${m} ชำระแล้ว) · ยอดรวม ฿${fmt(prevBcAmt + fuelAmt)}`
+        : `ตัดยอดค่าน้ำมัน ฿${fmt(fuelAmt)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว · ยอดรวม ฿${fmt(prevBcAmt + fuelAmt)}`
+    );
+  };
+
+  const handleTogglePaid = (expenseId: number) => {
+    const m = state.activeMonth;
+    const targetExp = state.expenses.find((e) => e.id === expenseId);
+    const wasPaid = !!(targetExp?.paid?.[m]);
+    const fuelAmt = Number(targetExp?.amounts?.[m]) || 0;
+    if (
+      targetExp &&
+      !wasPaid &&
+      fuelAmt > 0 &&
+      isFuelExpenseInput(
+        targetExp.name,
+        targetExp.category,
+        targetExp.subCategory
+      )
+    ) {
+      handleTransferFuelToBlueCard(expenseId);
+      return;
+    }
+
+    setState((prev) => {
+      const activeM = prev.activeMonth;
       return {
         ...prev,
         expenses: prev.expenses.map((exp) =>
           exp.id === expenseId
             ? {
                 ...exp,
-                paid: { ...exp.paid, [m]: !exp.paid?.[m] },
+                paid: { ...exp.paid, [activeM]: !exp.paid?.[activeM] },
               }
             : exp
         ),
@@ -737,6 +806,114 @@ export default function App() {
     });
   };
 
+  const applyBlueCardFuelRouting = (
+    prev: BudgetState,
+    baseMonthsToCharge: string[],
+    amountPerMonth: number,
+    baseExpenses: BudgetState['expenses']
+  ): BudgetState => {
+    const nextMonths = [...prev.months];
+    const nextIncomes = { ...prev.incomes };
+    const nextExpenses = baseExpenses.map((exp) => ({
+      ...exp,
+      amounts: { ...exp.amounts },
+      paid: { ...exp.paid },
+    }));
+
+    let bcIdx = nextExpenses.findIndex((exp) =>
+      isBlueCardExpenseName(exp.name)
+    );
+    if (bcIdx < 0) {
+      const nextId =
+        nextExpenses.reduce((max, item) => Math.max(max, item.id), 0) + 1;
+      const amounts: Record<string, number> = {};
+      nextMonths.forEach((mon) => {
+        amounts[mon] = 0;
+      });
+      nextExpenses.push({
+        id: nextId,
+        name: 'บัตรบรูการ์ด',
+        note: 'วันที่ 10-25',
+        category: 'ภาระผ่อนหนี้ (30%)',
+        amounts,
+        paid: {},
+      });
+      bcIdx = nextExpenses.length - 1;
+    }
+
+    const ensureMonthExists = (targetMon: string) => {
+      if (nextMonths.includes(targetMon)) return;
+      const seq = buildFutureMonthSequence(
+        nextMonths,
+        nextMonths[nextMonths.length - 1] || prev.activeMonth,
+        12
+      );
+      const targetPos = seq.findIndex((item) => item.month === targetMon);
+      const toCreate =
+        targetPos >= 0
+          ? seq.slice(1, targetPos + 1).map((item) => item.month)
+          : [targetMon];
+
+      toCreate.forEach((newMon) => {
+        if (nextMonths.includes(newMon)) return;
+        const lastMon = nextMonths[nextMonths.length - 1];
+        const prevInc = nextIncomes[lastMon] || {
+          salary: 21000,
+          salary29: 0,
+          side: 0,
+          extras: [],
+          socialSecurity: 0,
+          providentFund: 0,
+        };
+        nextExpenses.forEach((exp) => {
+          const hasPre = Object.prototype.hasOwnProperty.call(
+            exp.amounts,
+            newMon
+          );
+          const endedAtPrev =
+            !!exp.recurringEndMonth && exp.recurringEndMonth === lastMon;
+          const nextAmt = hasPre
+            ? Number(exp.amounts[newMon]) || 0
+            : endedAtPrev
+            ? 0
+            : Number(exp.amounts[lastMon]) || 0;
+          exp.amounts[newMon] = nextAmt;
+          exp.paid[newMon] = false;
+        });
+        nextMonths.push(newMon);
+        nextIncomes[newMon] = {
+          salary: Number(prevInc.salary) || 0,
+          salary29: Number(prevInc.salary29) || 0,
+          side: 0,
+          extras: [],
+          socialSecurity: Number(prevInc.socialSecurity) || 0,
+          providentFund: Number(prevInc.providentFund) || 0,
+        };
+      });
+    };
+
+    baseMonthsToCharge.forEach((baseMon) => {
+      const { targetMonth } = resolveBlueCardTargetMonth(
+        nextExpenses,
+        nextMonths,
+        baseMon
+      );
+      ensureMonthExists(targetMonth);
+      const bc = nextExpenses[bcIdx];
+      const prevAmt = Number(bc.amounts[targetMonth]) || 0;
+      bc.amounts[targetMonth] =
+        Math.round((prevAmt + amountPerMonth) * 100) / 100;
+      bc.note = appendBlueCardFuelNote(bc.note, targetMonth, amountPerMonth);
+    });
+
+    return {
+      ...prev,
+      months: nextMonths,
+      incomes: nextIncomes,
+      expenses: nextExpenses,
+    };
+  };
+
   const handleEditExpense = (data: {
     id: number;
     name: string;
@@ -749,7 +926,69 @@ export default function App() {
     recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
+    transferToBlueCard?: boolean;
   }) => {
+    if (data.transferToBlueCard) {
+      const baseMon = data.applyFutureMonths
+        ? data.recurringStartMonth || state.activeMonth
+        : state.activeMonth;
+      const preview = resolveBlueCardTargetMonth(
+        state.expenses,
+        state.months,
+        baseMon
+      );
+      const bcName = preview.blueCardItem?.name || 'บัตรบรูการ์ด';
+      const prevBcAmt = Number(preview.blueCardItem?.amounts?.[preview.targetMonth]) || 0;
+
+      setState((prev) => {
+        const m = prev.activeMonth;
+        const startMonth = data.recurringStartMonth || m;
+        const futureSeq = buildFutureMonthSequence(
+          prev.months,
+          startMonth,
+          Math.max(36, (data.recurringMonths || 12) + 6)
+        );
+        const endIdxInSeq = data.recurringEndMonth
+          ? futureSeq.findIndex((item) => item.month === data.recurringEndMonth)
+          : -1;
+
+        const targetChargeMonths = data.applyFutureMonths
+          ? endIdxInSeq >= 0
+            ? futureSeq.slice(0, endIdxInSeq + 1).map((i) => i.month)
+            : futureSeq
+                .filter((i) => i.isExisting)
+                .map((i) => i.month)
+          : [m];
+
+        const cleanedExpenses = prev.expenses
+          .map((exp) => {
+            if (exp.id !== data.id) return exp;
+            const nextAmounts = { ...exp.amounts };
+            targetChargeMonths.forEach((mon) => {
+              nextAmounts[mon] = 0;
+            });
+            return { ...exp, amounts: nextAmounts };
+          })
+          .filter((exp) =>
+            Object.values(exp.amounts || {}).some((v) => (Number(v) || 0) > 0)
+          );
+
+        return applyBlueCardFuelRouting(
+          prev,
+          targetChargeMonths,
+          data.amount,
+          cleanedExpenses
+        );
+      });
+
+      setSyncBannerMsg(
+        preview.isDeferredToNextMonth
+          ? `ตัดยอดค่าน้ำมัน ฿${fmt(data.amount)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว (เนื่องจากเดือน ${baseMon} ชำระแล้ว) · ยอดรวม ฿${fmt(prevBcAmt + data.amount)}`
+          : `ตัดยอดค่าน้ำมัน ฿${fmt(data.amount)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว · ยอดรวม ฿${fmt(prevBcAmt + data.amount)}`
+      );
+      return;
+    }
+
     setState((prev) => {
       const m = prev.activeMonth;
       const startMonth = data.recurringStartMonth || m;
@@ -849,7 +1088,57 @@ export default function App() {
     recurringEndMonth: string;
     recurringMonths: number;
     paid: boolean;
+    chargeToBlueCard?: boolean;
   }) => {
+    if (data.chargeToBlueCard) {
+      const baseMon = data.recurring
+        ? data.recurringStartMonth || state.activeMonth
+        : state.activeMonth;
+      const preview = resolveBlueCardTargetMonth(
+        state.expenses,
+        state.months,
+        baseMon
+      );
+      const bcName = preview.blueCardItem?.name || 'บัตรบรูการ์ด';
+      const prevBcAmt = Number(preview.blueCardItem?.amounts?.[preview.targetMonth]) || 0;
+
+      setState((prev) => {
+        const startMonth = data.recurring
+          ? data.recurringStartMonth || prev.activeMonth
+          : prev.activeMonth;
+        const futureSeq = buildFutureMonthSequence(
+          prev.months,
+          startMonth,
+          Math.max(36, (data.recurringMonths || 12) + 6)
+        );
+        const endIdxInSeq = data.recurringEndMonth
+          ? futureSeq.findIndex((item) => item.month === data.recurringEndMonth)
+          : -1;
+
+        const targetChargeMonths = data.recurring
+          ? endIdxInSeq >= 0
+            ? futureSeq.slice(0, endIdxInSeq + 1).map((i) => i.month)
+            : futureSeq
+                .filter((i) => i.isExisting)
+                .map((i) => i.month)
+          : [prev.activeMonth];
+
+        return applyBlueCardFuelRouting(
+          prev,
+          targetChargeMonths,
+          data.amount,
+          prev.expenses
+        );
+      });
+
+      setSyncBannerMsg(
+        preview.isDeferredToNextMonth
+          ? `ตัดยอดค่าน้ำมัน ฿${fmt(data.amount)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว (เนื่องจากเดือน ${baseMon} ชำระแล้ว) · ยอดรวม ฿${fmt(prevBcAmt + data.amount)}`
+          : `ตัดยอดค่าน้ำมัน ฿${fmt(data.amount)} เข้า "${bcName}" เดือน ${preview.targetMonth} แล้ว · ยอดรวม ฿${fmt(prevBcAmt + data.amount)}`
+      );
+      return;
+    }
+
     setState((prev) => {
       const startMonth = data.recurring
         ? data.recurringStartMonth || prev.activeMonth
@@ -1488,6 +1777,7 @@ export default function App() {
             onRequestDeleteExpense={(id, name) =>
               setConfirmAction({ type: 'delete-expense', id, name })
             }
+            onTransferFuelToBlueCard={handleTransferFuelToBlueCard}
             onOpenIncomeModal={() => setIsIncomeModalOpen(true)}
             onOpenExpenseModal={() => setIsExpenseModalOpen(true)}
           />
@@ -1538,6 +1828,7 @@ export default function App() {
         isOpen={isExpenseModalOpen}
         months={state.months}
         activeMonth={state.activeMonth}
+        expenses={state.expenses}
         onClose={() => setIsExpenseModalOpen(false)}
         onSubmit={handleAddExpense}
       />
@@ -1560,6 +1851,7 @@ export default function App() {
         isOpen={!!editingExpense}
         months={state.months}
         activeMonth={state.activeMonth}
+        expenses={state.expenses}
         expense={editingExpense}
         onClose={() => setEditingExpense(null)}
         onSubmit={handleEditExpense}

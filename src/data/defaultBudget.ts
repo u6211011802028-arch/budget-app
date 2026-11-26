@@ -123,7 +123,7 @@ export const ESSENTIAL_SUBCATEGORIES: {
 ];
 
 export function detectEssentialSubcategory(itemName: string): EssentialSubcategory {
-  const n = String(itemName || '').trim().toLowerCase();
+  const n = String(itemName || '').normalize('NFC').trim().toLowerCase();
   if (!n) return 'จำเป็นอื่นๆ';
 
   // Utility water bills / plumbing repairs stay in จำเป็นอื่นๆ
@@ -138,6 +138,7 @@ export function detectEssentialSubcategory(itemName: string): EssentialSubcatego
     n.includes('แทงค์น้ำ') ||
     (n.startsWith('ค่าน้ำ') &&
       !n.includes('น้ำมัน') &&
+      !n.includes('นำ้มัน') &&
       !n.includes('น้ำดื่ม') &&
       !n.includes('น้ำปั่น') &&
       !n.includes('น้ำอัดลม') &&
@@ -164,6 +165,7 @@ export function detectEssentialSubcategory(itemName: string): EssentialSubcatego
 
   const fuelKeywords = [
     'น้ำมัน',
+    'นำ้มัน',
     'ดีเซล',
     'เบนซิน',
     'แก๊สโซฮอล์',
@@ -275,6 +277,106 @@ export function resolveEssentialSubcategory(
   if (item.category !== 'ค่าใช้จ่ายจำเป็น (40%)') return null;
   if (item.subCategory) return item.subCategory;
   return detectEssentialSubcategory(item.name);
+}
+
+export function isBlueCardExpenseName(name: string): boolean {
+  const n = String(name || '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  if (!n) return false;
+  return (
+    n.includes('บรูการ์ด') ||
+    n.includes('บลูการ์ด') ||
+    n.includes('บูลการ์ด') ||
+    n.includes('บูการ์ด') ||
+    n.includes('บรูกาด') ||
+    n.includes('บลูกาด') ||
+    n.includes('bluecard') ||
+    n.includes('pttblue')
+  );
+}
+
+export function isFuelExpenseInput(
+  name: string,
+  category: BudgetCategory,
+  subCategory?: EssentialSubcategory
+): boolean {
+  if (isBlueCardExpenseName(name)) return false;
+  if (category === 'ค่าใช้จ่ายจำเป็น (40%)' && subCategory === 'ค่าน้ำมัน') {
+    return true;
+  }
+  return detectEssentialSubcategory(name) === 'ค่าน้ำมัน';
+}
+
+export function appendBlueCardFuelNote(
+  existingNote: string,
+  targetMonth: string,
+  addedAmount: number
+): string {
+  const cleanAdded = Math.round(addedAmount * 100) / 100;
+  const base = String(existingNote || '').trim();
+  const baseClean = !base || base === '-' ? '' : base;
+  const escapedMonth = targetMonth.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const monthTagRegex = new RegExp(
+    `น้ำมัน\\s+${escapedMonth}:\\s*฿([\\d,]+(?:\\.\\d+)?)`
+  );
+  const match = baseClean.match(monthTagRegex);
+  const formatVal = (v: number) =>
+    v % 1 === 0
+      ? v.toLocaleString('th-TH', { maximumFractionDigits: 0 })
+      : v.toLocaleString('th-TH', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+
+  if (match) {
+    const prevVal = parseFloat(match[1].replace(/,/g, '')) || 0;
+    const nextVal = Math.round((prevVal + cleanAdded) * 100) / 100;
+    return baseClean.replace(
+      monthTagRegex,
+      `น้ำมัน ${targetMonth}: ฿${formatVal(nextVal)}`
+    );
+  }
+  const tag = `น้ำมัน ${targetMonth}: ฿${formatVal(cleanAdded)}`;
+  return baseClean ? `${baseClean} · ${tag}` : tag;
+}
+
+export function resolveBlueCardTargetMonth(
+  expenses: ExpenseItem[],
+  months: string[],
+  baseMonth: string
+): {
+  blueCardItem: ExpenseItem | null;
+  targetMonth: string;
+  isDeferredToNextMonth: boolean;
+  currentMonthPaid: boolean;
+} {
+  const blueCardItem =
+    expenses.find((exp) => isBlueCardExpenseName(exp.name)) || null;
+  const currentMonthPaid = !!(blueCardItem?.paid?.[baseMonth]);
+  if (!currentMonthPaid) {
+    return {
+      blueCardItem,
+      targetMonth: baseMonth,
+      isDeferredToNextMonth: false,
+      currentMonthPaid: false,
+    };
+  }
+
+  const seq = buildFutureMonthSequence(months, baseMonth, 12);
+  const nextUnpaid = seq
+    .slice(1)
+    .find((item) => !(blueCardItem?.paid?.[item.month]));
+
+  const targetMonth = nextUnpaid?.month || seq[1]?.month || baseMonth;
+  return {
+    blueCardItem,
+    targetMonth,
+    isDeferredToNextMonth: targetMonth !== baseMonth,
+    currentMonthPaid: true,
+  };
 }
 
 export const DEFAULT_BUDGET_STATE: BudgetState = {
@@ -449,14 +551,6 @@ export const DEFAULT_BUDGET_STATE: BudgetState = {
       note: '2/12/2026 (ของขวัญ+แชร์เค้ก)',
       category: 'เงินใช้ส่วนตัว (10%)',
       amounts: { 'พ.ย. 69': 200, 'ธ.ค. 69': 0, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 },
-      paid: { 'พ.ย. 69': false },
-    },
-    {
-      id: 21,
-      name: 'ค่าน้ำมัน',
-      note: 'ธ.ค. 69 (ค่าน้ำมันเดินทาง)',
-      category: 'เงินใช้ส่วนตัว (10%)',
-      amounts: { 'พ.ย. 69': 0, 'ธ.ค. 69': 1500, 'ม.ค. 70': 0, 'ก.พ. 70': 0, 'มี.ค. 70': 0, 'เม.ย. 70': 0 },
       paid: { 'พ.ย. 69': false },
     },
   ],

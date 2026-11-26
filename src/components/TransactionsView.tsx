@@ -7,6 +7,7 @@ import {
   fmt,
   getMonthExpenses,
   getMonthIncome,
+  isFuelExpenseInput,
   resolveEssentialSubcategory,
 } from '../data/defaultBudget';
 
@@ -23,6 +24,7 @@ interface TransactionsViewProps {
   onTogglePaid: (expenseId: number) => void;
   onEditExpense: (item: MonthExpenseView) => void;
   onRequestDeleteExpense: (expenseId: number, name: string) => void;
+  onTransferFuelToBlueCard: (expenseId: number) => void;
   onOpenIncomeModal: () => void;
   onOpenExpenseModal: () => void;
 }
@@ -36,6 +38,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onTogglePaid,
   onEditExpense,
   onRequestDeleteExpense,
+  onTransferFuelToBlueCard,
   onOpenIncomeModal,
   onOpenExpenseModal,
 }) => {
@@ -497,6 +500,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <div className="inline-flex items-center justify-center gap-1">
+                        {isFuelExpenseInput(item.name, item.category, item.subCategory) && (
+                          <button
+                            type="button"
+                            onClick={() => onTransferFuelToBlueCard(item.id)}
+                            className="inline-flex items-center text-[11px] font-heading font-semibold text-[#006A63] hover:text-[#004D48] bg-[#E6F3F2] hover:bg-[#d3ebe9] px-2 py-1 rounded-md whitespace-nowrap transition"
+                            title="ตัดยอดค่าน้ำมันนี้เข้าบัตรบรูการ์ด (หากบัตรบรูการ์ดเดือนนี้จ่ายแล้วจะยกไปเดือนถัดไป)"
+                          >
+                            ตัดเข้าบรูการ์ด
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onEditExpense(item)}

@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { BudgetCategory, EssentialSubcategory } from '../types/budget';
+import { BudgetCategory, EssentialSubcategory, ExpenseItem } from '../types/budget';
 import {
   ESSENTIAL_SUBCATEGORIES,
   EXPENSE_CATEGORY_OPTIONS,
   buildFutureMonthSequence,
   detectEssentialSubcategory,
   fmt,
+  isFuelExpenseInput,
+  resolveBlueCardTargetMonth,
   resolveEssentialSubcategory,
 } from '../data/defaultBudget';
 
@@ -14,6 +16,7 @@ interface AddExpenseModalProps {
   isOpen: boolean;
   months: string[];
   activeMonth: string;
+  expenses: ExpenseItem[];
   onClose: () => void;
   onSubmit: (data: {
     name: string;
@@ -26,6 +29,7 @@ interface AddExpenseModalProps {
     recurringEndMonth: string;
     recurringMonths: number;
     paid: boolean;
+    chargeToBlueCard?: boolean;
   }) => void;
 }
 
@@ -33,6 +37,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   isOpen,
   months,
   activeMonth,
+  expenses,
   onClose,
   onSubmit,
 }) => {
@@ -49,6 +54,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [durationMonths, setDurationMonths] = useState('');
   const [recurringEndMonth, setRecurringEndMonth] = useState('');
   const [paid, setPaid] = useState(false);
+  const [chargeToBlueCard, setChargeToBlueCard] = useState(true);
 
   const parsedDuration = Math.max(0, parseInt(durationMonths, 10) || 0);
 
@@ -69,6 +75,22 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     [months, effectiveStartMonth, parsedDuration]
   );
 
+  const isFuel = useMemo(
+    () => isFuelExpenseInput(name, category, subCategory),
+    [name, category, subCategory]
+  );
+  const shouldChargeBlueCard = isFuel && chargeToBlueCard;
+
+  const blueCardResolution = useMemo(
+    () =>
+      resolveBlueCardTargetMonth(
+        expenses,
+        months,
+        recurring ? effectiveStartMonth : activeMonth
+      ),
+    [expenses, months, recurring, effectiveStartMonth, activeMonth]
+  );
+
   useEffect(() => {
     if (isOpen) {
       setName('');
@@ -84,6 +106,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setDurationMonths('');
       setRecurringEndMonth('');
       setPaid(false);
+      setChargeToBlueCard(true);
     }
   }, [isOpen, activeMonth]);
 
@@ -176,7 +199,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       recurringStartMonth: effectiveStartMonth,
       recurringEndMonth: finalEndMonth,
       recurringMonths: recurring ? effectiveMonths : 1,
-      paid,
+      paid: shouldChargeBlueCard ? false : paid,
+      chargeToBlueCard: shouldChargeBlueCard,
     });
     onClose();
   };
@@ -317,6 +341,60 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {isFuel && (
+            <div className="p-3 rounded-lg bg-[#E6F3F2]/75 border border-[#006A63]/25 space-y-1.5">
+              <label className="flex items-center gap-2 text-xs sm:text-sm font-heading font-semibold text-[#004D48] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chargeToBlueCard}
+                  onChange={(e) => setChargeToBlueCard(e.target.checked)}
+                  className="w-4 h-4 accent-[#006A63] rounded"
+                />
+                <span>ตัดยอดค่าน้ำมันเข้า &quot;{blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'}&quot; อัตโนมัติ</span>
+              </label>
+
+              {chargeToBlueCard ? (
+                <div className="pl-6 space-y-1 text-xs text-slate-700 font-heading">
+                  {blueCardResolution.isDeferredToNextMonth ? (
+                    <p className="text-amber-800 font-medium">
+                      {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {recurring ? effectiveStartMonth : activeMonth} ขึ้นสถานะจ่ายแล้ว ✓ →{' '}
+                      <span className="font-semibold">
+                        นำยอดไปคิดในเดือนถัดไป ({blueCardResolution.targetMonth})
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[#006A63]">
+                      {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {blueCardResolution.targetMonth} ยังไม่ชำระ → ตัดยอดรวมในเดือน{' '}
+                      <span className="font-semibold">{blueCardResolution.targetMonth}</span>
+                    </p>
+                  )}
+                  {effectiveMonthlyAmount > 0 && (
+                    <p className="text-slate-600">
+                      ยอด {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {blueCardResolution.targetMonth}:{' '}
+                      <span className="font-num">
+                        ฿{fmt(Number(blueCardResolution.blueCardItem?.amounts?.[blueCardResolution.targetMonth]) || 0)}
+                      </span>{' '}
+                      →{' '}
+                      <span className="font-num font-bold text-[#004D48]">
+                        ฿{fmt(
+                          (Number(blueCardResolution.blueCardItem?.amounts?.[blueCardResolution.targetMonth]) || 0) +
+                            effectiveMonthlyAmount
+                        )}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="pl-6 text-[11px] text-slate-500 font-heading">
+                  จะบันทึกเป็นรายการค่าน้ำมันแยกต่างหาก (ไม่รวมในยอดบัตรบรูการ์ด)
+                </p>
+              )}
             </div>
           )}
 
@@ -471,15 +549,17 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={paid}
-              onChange={(e) => setPaid(e.target.checked)}
-              className="w-4 h-4 accent-[#006A63] rounded"
-            />
-            <span>ทำเครื่องหมายว่าชำระเงินแล้วทันที</span>
-          </label>
+          {!shouldChargeBlueCard && (
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={paid}
+                onChange={(e) => setPaid(e.target.checked)}
+                className="w-4 h-4 accent-[#006A63] rounded"
+              />
+              <span>ทำเครื่องหมายว่าชำระเงินแล้วทันที</span>
+            </label>
+          )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <button
@@ -770,6 +850,7 @@ interface EditExpenseModalProps {
   isOpen: boolean;
   months: string[];
   activeMonth: string;
+  expenses: ExpenseItem[];
   expense: {
     id: number;
     name: string;
@@ -793,6 +874,7 @@ interface EditExpenseModalProps {
     recurringStartMonth: string;
     recurringEndMonth: string;
     recurringMonths: number;
+    transferToBlueCard?: boolean;
   }) => void;
 }
 
@@ -800,6 +882,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   isOpen,
   months,
   activeMonth,
+  expenses,
   expense,
   onClose,
   onSubmit,
@@ -816,6 +899,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
   const [recurringStartMonth, setRecurringStartMonth] = useState(activeMonth);
   const [durationMonths, setDurationMonths] = useState('');
   const [recurringEndMonth, setRecurringEndMonth] = useState('');
+  const [transferToBlueCard, setTransferToBlueCard] = useState(true);
 
   const parsedDuration = Math.max(0, parseInt(durationMonths, 10) || 0);
 
@@ -834,6 +918,22 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
         Math.max(36, parsedDuration + 6)
       ),
     [months, effectiveStartMonth, parsedDuration]
+  );
+
+  const isFuel = useMemo(
+    () => isFuelExpenseInput(name, category, subCategory),
+    [name, category, subCategory]
+  );
+  const shouldTransferBlueCard = isFuel && transferToBlueCard;
+
+  const blueCardResolution = useMemo(
+    () =>
+      resolveBlueCardTargetMonth(
+        expenses,
+        months,
+        applyFutureMonths ? effectiveStartMonth : activeMonth
+      ),
+    [expenses, months, applyFutureMonths, effectiveStartMonth, activeMonth]
   );
 
   useEffect(() => {
@@ -861,6 +961,7 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       setApplyFutureMonths(false);
       setRecurringMode('split');
       setRecurringStartMonth(activeMonth);
+      setTransferToBlueCard(true);
       const endM = expense.recurringEndMonth || '';
       setRecurringEndMonth(endM);
       if (endM) {
@@ -960,11 +1061,12 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
       category,
       subCategory:
         category === 'ค่าใช้จ่ายจำเป็น (40%)' ? subCategory : undefined,
-      paid,
+      paid: shouldTransferBlueCard ? false : paid,
       applyFutureMonths,
       recurringStartMonth: effectiveStartMonth,
       recurringEndMonth: finalEndMonth,
       recurringMonths: applyFutureMonths ? effectiveMonths : 1,
+      transferToBlueCard: shouldTransferBlueCard,
     });
     onClose();
   };
@@ -1087,6 +1189,56 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {isFuel && (
+            <div className="p-3 rounded-lg bg-[#E6F3F2]/75 border border-[#006A63]/25 space-y-1.5">
+              <label className="flex items-center gap-2 text-xs sm:text-sm font-heading font-semibold text-[#004D48] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={transferToBlueCard}
+                  onChange={(e) => setTransferToBlueCard(e.target.checked)}
+                  className="w-4 h-4 accent-[#006A63] rounded"
+                />
+                <span>ตัดยอดค่าน้ำมันนี้เข้า &quot;{blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'}&quot;</span>
+              </label>
+
+              {transferToBlueCard && (
+                <div className="pl-6 space-y-1 text-xs text-slate-700 font-heading">
+                  {blueCardResolution.isDeferredToNextMonth ? (
+                    <p className="text-amber-800 font-medium">
+                      {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {applyFutureMonths ? effectiveStartMonth : activeMonth} ขึ้นสถานะจ่ายแล้ว ✓ →{' '}
+                      <span className="font-semibold">
+                        นำยอดไปคิดในเดือนถัดไป ({blueCardResolution.targetMonth})
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[#006A63]">
+                      {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {blueCardResolution.targetMonth} ยังไม่ชำระ → ตัดยอดรวมในเดือน{' '}
+                      <span className="font-semibold">{blueCardResolution.targetMonth}</span>
+                    </p>
+                  )}
+                  {effectiveMonthlyAmount > 0 && (
+                    <p className="text-slate-600">
+                      ยอด {blueCardResolution.blueCardItem?.name || 'บัตรบรูการ์ด'} เดือน{' '}
+                      {blueCardResolution.targetMonth}:{' '}
+                      <span className="font-num">
+                        ฿{fmt(Number(blueCardResolution.blueCardItem?.amounts?.[blueCardResolution.targetMonth]) || 0)}
+                      </span>{' '}
+                      →{' '}
+                      <span className="font-num font-bold text-[#004D48]">
+                        ฿{fmt(
+                          (Number(blueCardResolution.blueCardItem?.amounts?.[blueCardResolution.targetMonth]) || 0) +
+                            effectiveMonthlyAmount
+                        )}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1239,15 +1391,17 @@ export const EditExpenseModal: React.FC<EditExpenseModalProps> = ({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={paid}
-              onChange={(e) => setPaid(e.target.checked)}
-              className="w-4 h-4 accent-[#006A63] rounded"
-            />
-            <span>ชำระเงินแล้ว</span>
-          </label>
+          {!shouldTransferBlueCard && (
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={paid}
+                onChange={(e) => setPaid(e.target.checked)}
+                className="w-4 h-4 accent-[#006A63] rounded"
+              />
+              <span>ชำระเงินแล้ว</span>
+            </label>
+          )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <button
