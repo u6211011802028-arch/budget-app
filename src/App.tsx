@@ -284,6 +284,16 @@ export default function App() {
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  const sheetConnRef = useRef(sheetConn);
+  sheetConnRef.current = sheetConn;
+  const needsAuthRef = useRef(needsAuth);
+  needsAuthRef.current = needsAuth;
+  const isSyncingRef = useRef(isSyncing);
+  isSyncingRef.current = isSyncing;
+  const isConfirmLoadingRef = useRef(isConfirmLoading);
+  isConfirmLoadingRef.current = isConfirmLoading;
+  const isAutoSavingRef = useRef(false);
+  const isInitialMountRef = useRef(true);
 
   const syncPayloadKey = useMemo(
     () =>
@@ -307,16 +317,21 @@ export default function App() {
   const lastSyncedSnapshotRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
-  // Save budget state locally & mark dirty if edited after last sync
+  // Save budget state locally & mark dirty if edited after mount/sync
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       // ignore storage quota errors
     }
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
     if (
-      lastSyncedSnapshotRef.current !== null &&
-      lastSyncedSnapshotRef.current !== syncPayloadKey
+      (lastSyncedSnapshotRef.current !== null &&
+        lastSyncedSnapshotRef.current !== syncPayloadKey) ||
+      (lastSyncedSnapshotRef.current === null && Boolean(loadSheetPref()))
     ) {
       setDirtyLocalEdits(true);
     }
@@ -343,6 +358,113 @@ export default function App() {
     }
   }, [sheetConn]);
 
+  const performAutoSaveNow = useCallback(async () => {
+    const activeConn = sheetConnRef.current;
+    if (!activeConn || !(activeConn.autoSave ?? true) || needsAuthRef.current) {
+      return;
+    }
+    if (
+      isAutoSavingRef.current ||
+      isSyncingRef.current ||
+      isConfirmLoadingRef.current
+    ) {
+      return;
+    }
+    if (
+      lastSyncedSnapshotRef.current === syncPayloadKeyRef.current &&
+      !hasDirtyLocalEdits()
+    ) {
+      return;
+    }
+
+    let token = getAccessToken();
+    if (!token) {
+      token = await refreshAccessTokenSilently();
+    }
+    if (!token) {
+      setNeedsAuth(true);
+      return;
+    }
+
+    const writeLatestState = async (authToken: string) => {
+      const snapshotToSave = syncPayloadKeyRef.current;
+      const latestState = stateRef.current;
+      const updatedSheets = await writeBudgetStateToTabs(
+        authToken,
+        activeConn.spreadsheetId,
+        activeConn.selectedSheetTitle,
+        latestState,
+        true,
+        activeConn.sheets.map((s) => s.title)
+      );
+
+      // Guard against file-switch race while request was in flight
+      if (sheetConnRef.current?.spreadsheetId !== activeConn.spreadsheetId) {
+        return;
+      }
+
+      const stillDirty = syncPayloadKeyRef.current !== snapshotToSave;
+      lastSyncedSnapshotRef.current = snapshotToSave;
+      setDirtyLocalEdits(stillDirty);
+      const nowTime = formatSyncTimestamp();
+      setSheetConn((prev) =>
+        prev && prev.spreadsheetId === activeConn.spreadsheetId
+          ? {
+              ...prev,
+              sheets: updatedSheets || prev.sheets,
+              lastSyncedAt: nowTime,
+            }
+          : prev
+      );
+    };
+
+    isAutoSavingRef.current = true;
+    setIsAutoSaving(true);
+    setSyncError(null);
+
+    try {
+      await writeLatestState(token);
+    } catch (err: any) {
+      if (err instanceof AuthExpiredError) {
+        clearCachedToken();
+        const renewed = await refreshAccessTokenSilently();
+        if (renewed) {
+          try {
+            await writeLatestState(renewed);
+            return;
+          } catch {
+            setNeedsAuth(true);
+            return;
+          }
+        }
+        setNeedsAuth(true);
+      } else {
+        setSyncError(
+          err?.message || 'บันทึกข้อมูลอัตโนมัติเข้า Google Sheets ไม่สำเร็จ'
+        );
+      }
+    } finally {
+      isAutoSavingRef.current = false;
+      setIsAutoSaving(false);
+      const currConn = sheetConnRef.current;
+      if (
+        currConn &&
+        (currConn.autoSave ?? true) &&
+        !needsAuthRef.current &&
+        !isSyncingRef.current &&
+        !isConfirmLoadingRef.current &&
+        (lastSyncedSnapshotRef.current !== syncPayloadKeyRef.current ||
+          hasDirtyLocalEdits()) &&
+        autoSaveTimerRef.current === null
+      ) {
+        autoSaveTimerRef.current = window.setTimeout(() => {
+          autoSaveTimerRef.current = null;
+          void performAutoSaveNow();
+        }, 1200);
+      }
+    }
+  }, []);
+
   const connectToSpreadsheet = useCallback(
     async (
       spreadsheetId: string,
@@ -350,8 +472,15 @@ export default function App() {
       options?: {
         autoRefreshOverride?: number;
         pullFromSheet?: boolean;
+        isNewFile?: boolean;
       }
     ) => {
+      // Cancel any pending debounced auto-save for a previous file before connecting
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+
       let token = getAccessToken();
       if (!token) {
         token = await refreshAccessTokenSilently();
@@ -370,32 +499,73 @@ export default function App() {
           throw new Error('ไม่พบแผ่นงาน (Sheet Tab) ในไฟล์สเปรดชีตนี้');
         }
 
-        const targetTab =
+        const existingPref = loadSheetPref();
+        const previousId =
+          sheetConnRef.current?.spreadsheetId || existingPref?.spreadsheetId;
+        const isNewFile =
+          options?.isNewFile ??
+          (Boolean(previousId) && previousId !== meta.spreadsheetId);
+
+        const helperTabs = new Set([
+          'รายรับประจำเดือน',
+          'สถานะชำระ',
+          'บัตรเครดิต',
+          'ตั้งค่าระบบ',
+        ]);
+
+        let targetTab =
           preferredTab && meta.sheets.some((s) => s.title === preferredTab)
             ? preferredTab
             : meta.sheets.some((s) => s.title === 'รายจ่าย-40-30-20-10')
             ? 'รายจ่าย-40-30-20-10'
-            : meta.sheets[0].title;
+            : meta.sheets.find(
+                (s) =>
+                  !helperTabs.has(s.title) &&
+                  /รายจ่าย|expense|transaction|งบ|budget|บัญชี/i.test(s.title)
+              )?.title ||
+              meta.sheets.find((s) => !helperTabs.has(s.title))?.title ||
+              meta.sheets[0].title;
 
-        const existingPref = loadSheetPref();
-        const autoSaveEnabled =
-          existingPref?.spreadsheetId === meta.spreadsheetId
+        const autoSaveEnabledDefault =
+          !isNewFile && existingPref?.spreadsheetId === meta.spreadsheetId
             ? existingPref.autoSave ?? true
             : true;
 
+        let autoSaveEnabled = autoSaveEnabledDefault;
         let nextSnapshot = syncPayloadKeyRef.current;
         let syncedAtValue: string | null = null;
+        let shouldPromptInitialPush = false;
         let bannerText = autoSaveEnabled
           ? `เชื่อมต่อไฟล์ "${meta.title}" แล้ว — ระบบจะบันทึกข้อมูลเข้า Google Sheet อัตโนมัติเมื่อมีการแก้ไข`
           : `เชื่อมต่อไฟล์ "${meta.title}" แล้ว — กด "บันทึกข้อมูลเข้า Google Sheet" เมื่อต้องการอัปเดตไฟล์`;
 
         if (options?.pullFromSheet) {
           const sheetTitles = meta.sheets.map((s) => s.title);
-          const primaryRows = await fetchSheetValues(
+          let primaryRows = await fetchSheetValues(
             activeToken,
             meta.spreadsheetId,
             targetTab
           );
+
+          // When linking a new spreadsheet without a preferred tab, probe other non-helper tabs if the first candidate is empty
+          if (!preferredTab && primaryRows.length < 2 && meta.sheets.length > 1) {
+            const candidates = meta.sheets
+              .map((s) => s.title)
+              .filter((t) => t !== targetTab && !helperTabs.has(t))
+              .slice(0, 4);
+            for (const candTitle of candidates) {
+              const candRows = await fetchSheetValues(
+                activeToken,
+                meta.spreadsheetId,
+                candTitle
+              ).catch(() => []);
+              if (candRows.length >= 2) {
+                targetTab = candTitle;
+                primaryRows = candRows;
+                break;
+              }
+            }
+          }
 
           if (primaryRows.length >= 2) {
             const hasIncomeTab =
@@ -447,7 +617,8 @@ export default function App() {
                 paidRows,
                 stateRef.current,
                 creditCardRows,
-                settingsRows
+                settingsRows,
+                { replaceMissingWithDefaults: isNewFile }
               );
               nextSnapshot = JSON.stringify({
                 months: parsed.state.months,
@@ -460,21 +631,35 @@ export default function App() {
               setDirtyLocalEdits(false);
               setState(parsed.state);
               syncedAtValue = formatSyncTimestamp();
-              bannerText = `อัปเดตข้อมูลจากไฟล์ "${meta.title}" (${parsed.rowCount} รายการ) แล้ว${
-                autoSaveEnabled ? ' และเปิดบันทึกอัตโนมัติเมื่อแก้ไข' : ''
-              }`;
+              bannerText = isNewFile
+                ? `เชื่อมต่อไฟล์ใหม่ "${meta.title}" และอัปเดตข้อมูลตาม Google Sheet (${parsed.rowCount} รายการ, ${parsed.state.months.length} เดือน) แล้ว${
+                    autoSaveEnabled ? ' · เปิดบันทึกอัตโนมัติเมื่อแก้ไข' : ''
+                  }`
+                : `อัปเดตข้อมูลจากไฟล์ "${meta.title}" (${parsed.rowCount} รายการ) แล้ว${
+                    autoSaveEnabled ? ' · เปิดบันทึกอัตโนมัติเมื่อแก้ไข' : ''
+                  }`;
             } catch (parseErr: any) {
+              if (isNewFile) {
+                autoSaveEnabled = false;
+              }
               setSyncError(
                 parseErr?.message ||
-                  'รูปแบบข้อมูลในแผ่นงานยังไม่ตรงกับเทมเพลต จึงยังคงใช้ข้อมูลเดิมในแอป'
+                  'รูปแบบข้อมูลในแผ่นงานยังไม่ตรงกับเทมเพลต จึงยังคงใช้ข้อมูลเดิมในแอปและปิดบันทึกอัตโนมัติไว้ชั่วคราวเพื่อความปลอดภัย'
               );
             }
           } else {
-            bannerText = `เชื่อมต่อไฟล์ "${meta.title}" แล้ว (แผ่นงานยังว่างอยู่ กด "บันทึกข้อมูลเข้า Google Sheet" เพื่อส่งข้อมูลจากแอปขึ้นไฟล์ได้ทันที)`;
+            lastSyncedSnapshotRef.current = nextSnapshot;
+            setDirtyLocalEdits(false);
+            if (isNewFile) {
+              shouldPromptInitialPush = true;
+              bannerText = `เชื่อมต่อไฟล์ใหม่ "${meta.title}" แล้ว (แผ่นงานยังว่างอยู่ กรุณายืนยันเพื่อบันทึกข้อมูลจากแอปขึ้นไฟล์)`;
+            } else {
+              bannerText = `เชื่อมต่อไฟล์ "${meta.title}" แล้ว (แผ่นงานยังว่างอยู่ กด "บันทึกข้อมูลเข้า Google Sheet" เพื่อส่งข้อมูลจากแอปขึ้นไฟล์ได้ทันที)`;
+            }
           }
+        } else {
+          lastSyncedSnapshotRef.current = nextSnapshot;
         }
-
-        lastSyncedSnapshotRef.current = nextSnapshot;
 
         setSheetConn((prev) => ({
           spreadsheetId: meta.spreadsheetId,
@@ -493,13 +678,17 @@ export default function App() {
             options?.autoRefreshOverride !== undefined
               ? options.autoRefreshOverride
               : prev?.autoRefreshSec ?? 0,
-          autoSave:
-            prev?.spreadsheetId === meta.spreadsheetId
-              ? prev.autoSave ?? autoSaveEnabled
-              : autoSaveEnabled,
+          autoSave: isNewFile
+            ? autoSaveEnabled
+            : prev?.spreadsheetId === meta.spreadsheetId
+            ? prev.autoSave ?? autoSaveEnabled
+            : autoSaveEnabled,
         }));
 
         setSyncBannerMsg(bannerText);
+        if (shouldPromptInitialPush) {
+          setConfirmAction({ type: 'push-to-sheet' });
+        }
       };
 
       try {
@@ -559,6 +748,7 @@ export default function App() {
               {
                 autoRefreshOverride: savedPref.autoRefreshSec,
                 pullFromSheet: !hasDirtyLocalEdits(),
+                isNewFile: false,
               }
             );
           } else {
@@ -566,6 +756,7 @@ export default function App() {
             if (discovered?.id) {
               await connectToSpreadsheet(discovered.id, undefined, {
                 pullFromSheet: !hasDirtyLocalEdits(),
+                isNewFile: false,
               });
             }
           }
@@ -593,100 +784,60 @@ export default function App() {
   }, [needsAuth]);
 
   // Automatic debounced save to Google Sheets when data changes
+  const connectedSpreadsheetId = sheetConn?.spreadsheetId;
+  const connectedSheetTab = sheetConn?.selectedSheetTitle;
+  const connectedAutoSave = sheetConn?.autoSave ?? true;
+
   useEffect(() => {
-    if (!sheetConn || !(sheetConn.autoSave ?? true) || needsAuth) return;
+    if (!connectedSpreadsheetId || !connectedAutoSave || needsAuth) return;
     if (isSyncing || isConfirmLoading) return;
-    if (lastSyncedSnapshotRef.current === syncPayloadKey && !hasDirtyLocalEdits()) return;
+    if (lastSyncedSnapshotRef.current === syncPayloadKey && !hasDirtyLocalEdits()) {
+      return;
+    }
 
     if (autoSaveTimerRef.current) {
       window.clearTimeout(autoSaveTimerRef.current);
     }
 
-    autoSaveTimerRef.current = window.setTimeout(async () => {
-      let token = getAccessToken();
-      if (!token) {
-        token = await refreshAccessTokenSilently();
-      }
-      if (!token) {
-        setNeedsAuth(true);
-        return;
-      }
-
-      const snapshotToSave = syncPayloadKeyRef.current;
-      const latestState = stateRef.current;
-      setIsAutoSaving(true);
-      setSyncError(null);
-
-      try {
-        const updatedSheets = await writeBudgetStateToTabs(
-          token,
-          sheetConn.spreadsheetId,
-          sheetConn.selectedSheetTitle,
-          latestState,
-          true,
-          sheetConn.sheets.map((s) => s.title)
-        );
-        lastSyncedSnapshotRef.current = snapshotToSave;
-        setDirtyLocalEdits(false);
-        const nowTime = formatSyncTimestamp();
-        setSheetConn((prev) =>
-          prev
-            ? {
-                ...prev,
-                sheets: updatedSheets || prev.sheets,
-                lastSyncedAt: nowTime,
-              }
-            : prev
-        );
-      } catch (err: any) {
-        if (err instanceof AuthExpiredError) {
-          clearCachedToken();
-          const renewed = await refreshAccessTokenSilently();
-          if (renewed) {
-            try {
-              const updatedSheets = await writeBudgetStateToTabs(
-                renewed,
-                sheetConn.spreadsheetId,
-                sheetConn.selectedSheetTitle,
-                stateRef.current,
-                true,
-                sheetConn.sheets.map((s) => s.title)
-              );
-              lastSyncedSnapshotRef.current = syncPayloadKeyRef.current;
-              setDirtyLocalEdits(false);
-              const nowTime = formatSyncTimestamp();
-              setSheetConn((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      sheets: updatedSheets || prev.sheets,
-                      lastSyncedAt: nowTime,
-                    }
-                  : prev
-              );
-              return;
-            } catch {
-              setNeedsAuth(true);
-              return;
-            }
-          }
-          setNeedsAuth(true);
-        } else {
-          setSyncError(
-            err?.message || 'บันทึกข้อมูลอัตโนมัติเข้า Google Sheets ไม่สำเร็จ'
-          );
-        }
-      } finally {
-        setIsAutoSaving(false);
-      }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void performAutoSaveNow();
     }, 2000);
 
     return () => {
       if (autoSaveTimerRef.current) {
         window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
       }
     };
-  }, [syncPayloadKey, sheetConn, needsAuth, isSyncing, isConfirmLoading]);
+  }, [
+    syncPayloadKey,
+    connectedSpreadsheetId,
+    connectedSheetTab,
+    connectedAutoSave,
+    needsAuth,
+    isSyncing,
+    isConfirmLoading,
+    performAutoSaveNow,
+  ]);
+
+  // Flush pending auto-save immediately if the user switches tabs or leaves the page
+  useEffect(() => {
+    const flushIfPending = () => {
+      if (
+        document.visibilityState === 'hidden' &&
+        autoSaveTimerRef.current !== null
+      ) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+        void performAutoSaveNow();
+      }
+    };
+    document.addEventListener('visibilitychange', flushIfPending);
+    return () => {
+      document.removeEventListener('visibilitychange', flushIfPending);
+    };
+  }, [performAutoSaveNow]);
 
   const handleLogin = async () => {
     setIsLoggingIn(true);
@@ -706,6 +857,7 @@ export default function App() {
           {
             autoRefreshOverride: savedPref.autoRefreshSec,
             pullFromSheet: !hasDirtyLocalEdits(),
+            isNewFile: false,
           }
         );
       } else {
@@ -714,6 +866,7 @@ export default function App() {
           hasAutoReconnectedRef.current = true;
           await connectToSpreadsheet(discovered.id, undefined, {
             pullFromSheet: !hasDirtyLocalEdits(),
+            isNewFile: false,
           });
         }
       }
@@ -741,7 +894,10 @@ export default function App() {
       token,
       async (file) => {
         setIsSheetsModalOpen(false);
-        await connectToSpreadsheet(file.id, undefined, { pullFromSheet: true });
+        await connectToSpreadsheet(file.id, undefined, {
+          pullFromSheet: true,
+          isNewFile: true,
+        });
       },
       (msg) => {
         setSyncError(msg);
@@ -750,7 +906,10 @@ export default function App() {
   };
 
   const handleConnectById = async (spreadsheetId: string) => {
-    await connectToSpreadsheet(spreadsheetId, undefined, { pullFromSheet: true });
+    await connectToSpreadsheet(spreadsheetId, undefined, {
+      pullFromSheet: true,
+      isNewFile: true,
+    });
     setIsSheetsModalOpen(false);
   };
 

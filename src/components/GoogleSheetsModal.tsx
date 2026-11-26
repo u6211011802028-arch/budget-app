@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FileSpreadsheet, FolderOpen, Link2, PlusCircle, X } from 'lucide-react';
 import { SheetConnection } from '../types/budget';
 import { extractSpreadsheetId } from '../services/googleSheets';
@@ -36,6 +36,13 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     connection?.spreadsheetUrl || connection?.spreadsheetId || ''
   );
   const [localErr, setLocalErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setUrlInput(connection?.spreadsheetUrl || connection?.spreadsheetId || '');
+      setLocalErr(null);
+    }
+  }, [isOpen, connection?.spreadsheetId, connection?.spreadsheetUrl]);
 
   if (!isOpen) return null;
 
@@ -215,15 +222,16 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
           {/* Export Structure Guide */}
           <div className="pt-4 border-t border-slate-100 text-xs text-slate-600 space-y-1.5">
             <div className="font-heading font-semibold text-slate-800">
-              ข้อมูลที่จะถูกบันทึกเข้า Google Sheets เมื่อกดบันทึก:
+              การทำงานเมื่อเชื่อมไฟล์ใหม่และบันทึกอัตโนมัติ:
             </div>
             <p>
-              1. <strong>แท็บหลัก ({connection?.selectedSheetTitle || 'รายจ่าย-40-30-20-10'}):</strong>{' '}
-              รายการค่าใช้จ่าย หมวดหมู่ หมายเหตุ และยอดแต่ละเดือน
+              1. <strong>เมื่อเชื่อมไฟล์ Google Sheet ใหม่:</strong>{' '}
+              หากไฟล์มีข้อมูลอยู่แล้ว ระบบจะดึงข้อมูลรายรับ-รายจ่าย บัตรเครดิต ผ่อน 0% และตั้งค่าจากไฟล์นั้นมาอัปเดตในแอปทันที (หากไฟล์ยังว่างจะขึ้นหน้าต่างให้กดยืนยันส่งข้อมูลขึ้นไฟล์)
             </p>
             <p>
-              2. <strong>แท็บรายรับประจำเดือน &amp; สถานะชำระ:</strong>{' '}
-              เงินเดือนรอบวันที่ 14/29 รายได้เสริม ประกันสังคม กองทุนสำรองเลี้ยงชีพ รายรับสุทธิ และสถานะจ่ายบิล
+              2. <strong>บันทึกอัตโนมัติครบทุกแท็บ:</strong>{' '}
+              อัปเดตทั้งแท็บหลัก ({connection?.selectedSheetTitle || 'รายจ่าย-40-30-20-10'}),{' '}
+              รายรับประจำเดือน, สถานะชำระ, บัตรเครดิต และตั้งค่าระบบ ให้อัตโนมัติหลังแก้ไข
             </p>
           </div>
         </div>

@@ -326,9 +326,12 @@ export interface ParsedSheetResult {
 
 function parseCreditCardsTabRows(
   creditCardTabRows: string[][] | null | undefined,
-  previousState: BudgetState
+  previousState: BudgetState,
+  replaceMissingWithDefaults = false
 ): CreditCardConfig[] {
-  const base = resolveCreditCards(previousState.creditCards);
+  const base = resolveCreditCards(
+    replaceMissingWithDefaults ? undefined : previousState.creditCards
+  );
   if (!creditCardTabRows || creditCardTabRows.length < 2) return base;
   const rows = creditCardTabRows.slice(1);
   const parsed = base.map((card) => {
@@ -373,15 +376,22 @@ interface ParsedSettingsTab {
 
 function parseSettingsTabRows(
   settingsTabRows: string[][] | null | undefined,
-  previousState: BudgetState
+  previousState: BudgetState,
+  replaceMissingWithDefaults = false
 ): ParsedSettingsTab {
-  const baseTargets = resolveTargetPercentages(previousState.targetPercentages);
+  const baseTargets = resolveTargetPercentages(
+    replaceMissingWithDefaults
+      ? DEFAULT_TARGET_PERCENTAGES
+      : previousState.targetPercentages
+  );
   const recurringEndMonths: Record<string, string> = {};
-  previousState.expenses.forEach((exp) => {
-    if (exp.recurringEndMonth) {
-      recurringEndMonths[exp.name] = exp.recurringEndMonth;
-    }
-  });
+  if (!replaceMissingWithDefaults) {
+    previousState.expenses.forEach((exp) => {
+      if (exp.recurringEndMonth) {
+        recurringEndMonths[exp.name] = exp.recurringEndMonth;
+      }
+    });
+  }
 
   if (!settingsTabRows || settingsTabRows.length < 2) {
     return {
@@ -458,7 +468,12 @@ function mergeIncomeTabRows(
     (h) => (h.includes('เงินเดือน') || h.includes('salary')) && !h.includes('29')
   );
   const sideCol = incHeader.findIndex((h) => h.includes('เสริม') || h.includes('side') || h.includes('ot'));
-  const extraCol = incHeader.findIndex((h) => h.includes('พิเศษ') || h.includes('extra'));
+  const extraJsonCol = incHeader.findIndex(
+    (h) => (h.includes('พิเศษ') || h.includes('extra')) && h.includes('json')
+  );
+  const extraCol = incHeader.findIndex(
+    (h) => (h.includes('พิเศษ') || h.includes('extra')) && !h.includes('json')
+  );
   const ssoCol = incHeader.findIndex(
     (h) => h.includes('ประกันสังคม') || h.includes('sso') || h.includes('social')
   );
@@ -488,7 +503,36 @@ function mergeIncomeTabRows(
     if (sideCol >= 0) incomes[mLabel].side = parseNumericCell(row[sideCol]);
     if (ssoCol >= 0) incomes[mLabel].socialSecurity = Math.max(0, parseNumericCell(row[ssoCol]));
     if (pvdCol >= 0) incomes[mLabel].providentFund = Math.max(0, parseNumericCell(row[pvdCol]));
-    if (extraCol >= 0) {
+
+    let parsedExtrasFromJson = false;
+    if (extraJsonCol >= 0) {
+      const rawExtrasJson = String(row[extraJsonCol] || '').trim();
+      if (rawExtrasJson.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(rawExtrasJson);
+          if (Array.isArray(parsed)) {
+            incomes[mLabel].extras = parsed
+              .filter(
+                (item: any) =>
+                  item &&
+                  typeof item.name === 'string' &&
+                  Number(item.amount) > 0
+              )
+              .map(
+                (item: any): ExtraIncomeItem => ({
+                  name: String(item.name).trim(),
+                  amount: Math.max(0, Number(item.amount) || 0),
+                })
+              );
+            parsedExtrasFromJson = true;
+          }
+        } catch {
+          // fall back to numeric extraCol
+        }
+      }
+    }
+
+    if (!parsedExtrasFromJson && extraCol >= 0) {
       const extraAmt = parseNumericCell(row[extraCol]);
       if (extraAmt > 0) {
         incomes[mLabel].extras = [{ name: 'รายรับพิเศษ (จาก Sheet)', amount: extraAmt }];
@@ -503,11 +547,14 @@ export function parseGoogleSheetsToBudget(
   paidTabRows: string[][] | null,
   previousState: BudgetState,
   creditCardTabRows?: string[][] | null,
-  settingsTabRows?: string[][] | null
+  settingsTabRows?: string[][] | null,
+  options?: { replaceMissingWithDefaults?: boolean }
 ): ParsedSheetResult {
   if (!primaryRows || primaryRows.length < 2) {
     throw new Error('ไม่พบข้อมูลในแผ่นงานที่เลือก (ต้องมีแถวหัวตารางอย่างน้อย 1 แถวและข้อมูล 1 แถว)');
   }
+
+  const replaceMissingWithDefaults = !!options?.replaceMissingWithDefaults;
 
   // Find header row (first non-empty row with >= 2 columns)
   let headerRowIdx = primaryRows.findIndex(
@@ -520,7 +567,7 @@ export function parseGoogleSheetsToBudget(
     r.some((c) => String(c || '').trim() !== '')
   );
 
-  // Detect Format A (Matrix: multiple month columns) vs Format B (Transactions log)
+  // Detect Format A (Matrix: month columns) vs Format B (Transactions log)
   const monthColumns: { colIdx: number; label: string }[] = [];
   headers.forEach((h, idx) => {
     const normalized = normalizeMonthLabel(h);
@@ -528,27 +575,44 @@ export function parseGoogleSheetsToBudget(
       monthColumns.push({ colIdx: idx, label: normalized });
     }
   });
+  const lowerHeaders = headers.map((h) => h.toLowerCase());
+  const hasExplicitAmountCol = lowerHeaders.some((h) =>
+    ['จำนวนเงิน', 'ยอดเงิน', 'ราคา', 'amount', 'price', 'total', 'บาท'].some(
+      (k) => h.includes(k)
+    )
+  );
+  const isMatrixFormat =
+    monthColumns.length >= 2 ||
+    (monthColumns.length === 1 && !hasExplicitAmountCol);
 
-  const resolvedCards = parseCreditCardsTabRows(creditCardTabRows, previousState);
-  const parsedSettings = parseSettingsTabRows(settingsTabRows, previousState);
+  const resolvedCards = parseCreditCardsTabRows(
+    creditCardTabRows,
+    previousState,
+    replaceMissingWithDefaults
+  );
+  const parsedSettings = parseSettingsTabRows(
+    settingsTabRows,
+    previousState,
+    replaceMissingWithDefaults
+  );
 
-  const res =
-    monthColumns.length >= 2
-      ? parseMatrixFormat(
-          headers,
-          dataRows,
-          monthColumns,
-          incomeTabRows,
-          paidTabRows,
-          previousState
-        )
-      : parseTransactionLogFormat(
-          headers,
-          dataRows,
-          incomeTabRows,
-          paidTabRows,
-          previousState
-        );
+  const res = isMatrixFormat
+    ? parseMatrixFormat(
+        headers,
+        dataRows,
+        monthColumns,
+        incomeTabRows,
+        paidTabRows,
+        previousState,
+        replaceMissingWithDefaults
+      )
+    : parseTransactionLogFormat(
+        headers,
+        dataRows,
+        incomeTabRows,
+        paidTabRows,
+        previousState
+      );
 
   res.state.creditCards = resolvedCards;
   res.state.targetPercentages = parsedSettings.targetPercentages;
@@ -573,7 +637,8 @@ function parseMatrixFormat(
   monthColumns: { colIdx: number; label: string }[],
   incomeTabRows: string[][] | null,
   paidTabRows: string[][] | null,
-  previousState: BudgetState
+  previousState: BudgetState,
+  replaceMissingWithDefaults = false
 ): ParsedSheetResult {
   const lowerHeaders = headers.map((h) => h.toLowerCase());
   const nameCol = lowerHeaders.findIndex((h) =>
@@ -598,11 +663,12 @@ function parseMatrixFormat(
 
   const resolvedNameCol = nameCol >= 0 ? nameCol : 0;
   const months = monthColumns.map((mc) => mc.label);
+  const hasIncomeTab = !!(incomeTabRows && incomeTabRows.length >= 2);
 
   const incomes: Record<string, MonthIncome> = {};
   months.forEach((m) => {
     incomes[m] = {
-      salary: 21000,
+      salary: hasIncomeTab ? 0 : 21000,
       salary29: 0,
       side: 0,
       extras: [],
@@ -704,7 +770,9 @@ function parseMatrixFormat(
     const amounts: Record<string, number> = {};
     const paid: Record<string, boolean> = {};
 
-    const prevMatch = previousState.expenses.find((e) => e.name === itemName);
+    const prevMatch = replaceMissingWithDefaults
+      ? undefined
+      : previousState.expenses.find((e) => e.name === itemName);
     const singlePaidCell = paidCol >= 0 ? isTruthyPaid(row[paidCol]) : false;
 
     monthColumns.forEach((mc) => {
@@ -1051,6 +1119,7 @@ export async function writeBudgetStateToTabs(
       'รายได้เสริม',
       'รายรับพิเศษ',
       'รายรับสุทธิรวม',
+      'รายละเอียดรายรับพิเศษ (JSON)',
     ];
     const incomeRows = state.months.map((m) => {
       const inc = state.incomes[m] || {
@@ -1072,7 +1141,19 @@ export async function writeBudgetStateToTabs(
       const net14 = sal14 - effectivePvd;
       const net29 = sal29 - effectiveSso;
       const netInc = net14 + net29 + side + extraSum;
-      return [m, sal14, pvd, net14, sal29, sso, net29, side, extraSum, netInc];
+      return [
+        m,
+        sal14,
+        pvd,
+        net14,
+        sal29,
+        sso,
+        net29,
+        side,
+        extraSum,
+        netInc,
+        JSON.stringify(inc.extras || []),
+      ];
     });
 
     const paidHeaders = ['รายการ', ...state.months];
